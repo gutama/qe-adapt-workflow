@@ -129,6 +129,18 @@ class PWInput:
         """Charge-density cutoff (Ry)."""
         return self.namelists.get("SYSTEM", {}).get("ecutrho")
 
+    def get_param(self, namelist: str, key: str, default: Any = None) -> Any:
+        """Get a namelist parameter value (case-insensitive namelist and key)."""
+        nl = self.namelists.get(namelist.upper(), {})
+        return nl.get(key.lower(), default)
+
+    def set_param(self, namelist: str, key: str, value: Any) -> None:
+        """Set a namelist parameter value (case-insensitive namelist and key)."""
+        nl_name = namelist.upper()
+        if nl_name not in self.namelists:
+            self.namelists[nl_name] = {}
+        self.namelists[nl_name][key.lower()] = value
+
 
 # -- Value helpers -----------------------------------------------------------
 
