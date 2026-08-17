@@ -9,7 +9,7 @@ from pathlib import Path
 from . import __version__
 from .io import PWInput, PWOutput, QEXMLOutput, read_pw_input, read_pw_output, read_qe_xml
 from .models import build_run_result
-from .report import dump_result_json, save_result_json
+from .report import dump_result_json, generate_text_report, save_result_json, save_text_report
 
 
 def _detect_and_load_sources(paths: list[str]) -> tuple[PWInput | None, PWOutput | None, QEXMLOutput | None, str | None]:
@@ -80,6 +80,33 @@ def cmd_dump(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    """Handle `qeanalyzer report` subcommand."""
+    pw_in, pw_out, qe_xml, input_text = _detect_and_load_sources(args.paths)
+
+    if not pw_in and not pw_out and not qe_xml:
+        sys.stderr.write("Error: No valid Quantum ESPRESSO input (.in), output (.out), or XML (.xml) files found.\n")
+        return 1
+
+    result = build_run_result(
+        pw_in=pw_in,
+        pw_out=pw_out,
+        qe_xml=qe_xml,
+        run_id=args.run_id,
+        parent_run=args.parent_run,
+        input_text=input_text,
+    )
+
+    report_text = generate_text_report(result, markdown=args.markdown)
+
+    if args.output:
+        save_text_report(result, args.output, markdown=args.markdown)
+    else:
+        sys.stdout.write(report_text)
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build root CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -126,6 +153,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Indentation spaces for JSON output (default: 2)",
     )
 
+    # report subcommand
+    report_parser = subparsers.add_parser(
+        "report",
+        help="Generate human-readable text or Markdown analysis report",
+    )
+    report_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Paths to calculation files (pw.in, pw.out, data-file-schema.xml) or directories",
+    )
+    report_parser.add_argument(
+        "-o", "--output",
+        help="Output destination path for the generated report",
+    )
+    report_parser.add_argument(
+        "--markdown",
+        action="store_true",
+        help="Generate report in GitHub-flavored Markdown format",
+    )
+    report_parser.add_argument(
+        "--run-id",
+        help="Optional unique calculation run identifier",
+    )
+    report_parser.add_argument(
+        "--parent-run",
+        help="Optional parent run identifier in the workflow DAG",
+    )
+
     return parser
 
 
@@ -136,6 +191,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "dump":
         return cmd_dump(args)
+    if args.command == "report":
+        return cmd_report(args)
 
     parser.print_help()
     return 0

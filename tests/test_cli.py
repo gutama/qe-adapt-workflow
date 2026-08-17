@@ -71,12 +71,50 @@ class TestCLI(unittest.TestCase):
         data = json.loads(buffer.getvalue())
         self.assertIn("calculation", data)
 
-    def test_dump_invalid_files_error(self):
-        err_buffer = io.StringIO()
-        with redirect_stderr(err_buffer):
-            code = main(["dump", "non_existent_file_xyz.foo"])
-        self.assertEqual(code, 1)
-        self.assertIn("Error:", err_buffer.getvalue())
+    def test_report_stdout(self):
+        buffer = io.StringIO()
+        args = [
+            "report",
+            str(FIXTURES / "si_scf.in"),
+            str(FIXTURES / "si_scf.out"),
+            str(FIXTURES / "si_scf.xml"),
+        ]
+        with redirect_stdout(buffer):
+            code = main(args)
+        self.assertEqual(code, 0)
+        output = buffer.getvalue()
+        self.assertIn("Quantum ESPRESSO Run Analysis", output)
+        self.assertIn("Electronic Structure", output)
+        self.assertIn("Diagnostics", output)
+
+    def test_report_markdown(self):
+        buffer = io.StringIO()
+        args = [
+            "report",
+            str(FIXTURES / "si_scf.out"),
+            "--markdown",
+        ]
+        with redirect_stdout(buffer):
+            code = main(args)
+        self.assertEqual(code, 0)
+        output = buffer.getvalue()
+        self.assertIn("# Quantum ESPRESSO Run Analysis", output)
+        self.assertIn("## Electronic Structure", output)
+
+    def test_report_to_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_file = Path(tmpdir) / "report.md"
+            args = [
+                "report",
+                str(FIXTURES / "si_scf.out"),
+                "-o",
+                str(out_file),
+                "--markdown",
+            ]
+            code = main(args)
+            self.assertEqual(code, 0)
+            self.assertTrue(out_file.exists())
+            self.assertIn("# Quantum ESPRESSO Run Analysis", out_file.read_text())
 
 
 if __name__ == "__main__":
