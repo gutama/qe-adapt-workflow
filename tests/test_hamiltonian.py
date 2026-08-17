@@ -97,6 +97,7 @@ class TestBandModelBoundary(unittest.TestCase):
         active = select_active_space(self.result, method="band_index", band_start=1, band_end=2)
         ham = build_band_model_hamiltonian(self.result, active, onsite_u_ev=3.0, intersite_v_ev=0.5)
         self.assertEqual(ham.metadata["model_kind"], "qe_band_heuristic")
+        self.assertEqual(ham.metadata["scientific_status"], "experimental_heuristic")
         self.assertFalse(ham.metadata["ab_initio"])
         self.assertEqual(ham.constant, 0.0)
         self.assertIn("not an ab-initio", ham.metadata["warning"].lower())
