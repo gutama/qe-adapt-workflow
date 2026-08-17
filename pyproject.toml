@@ -17,6 +17,12 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
 ]
 
+# numpy backs the quantum solver layer (exact diagonalization and the ADAPT-VQE
+# bridge), which is core functionality rather than an opt-in add-on.
+dependencies = [
+  "numpy>=1.24",
+]
+
 [project.optional-dependencies]
 plot = ["matplotlib>=3.6"]
 all = ["matplotlib>=3.6"]

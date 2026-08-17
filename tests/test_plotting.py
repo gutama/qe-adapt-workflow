@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,7 +18,28 @@ from qeanalyzer.workflow import WorkflowLedger, WorkflowRunEntry
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+# matplotlib ships in the optional 'plot' extra, so these tests must skip rather
+# than fail on an installation that did not ask for it.
+HAS_MATPLOTLIB = importlib.util.find_spec("matplotlib") is not None
+REQUIRES_MATPLOTLIB = unittest.skipUnless(
+    HAS_MATPLOTLIB, "matplotlib is not installed (optional 'plot' extra)"
+)
 
+
+class TestPlottingWithoutMatplotlib(unittest.TestCase):
+    """The plotting layer must fail with a usable message, not a raw ImportError."""
+
+    @unittest.skipIf(HAS_MATPLOTLIB, "matplotlib is installed")
+    def test_missing_matplotlib_raises_actionable_error(self):
+        pw_out = read_pw_output(FIXTURES / "si_scf.out")
+        result = build_run_result(pw_out=pw_out, run_id="si-scf")
+        with self.assertRaises(ImportError) as ctx:
+            plot_scf_convergence(result)
+        self.assertIn("matplotlib", str(ctx.exception))
+        self.assertIn("[plot]", str(ctx.exception))
+
+
+@REQUIRES_MATPLOTLIB
 class TestPlotting(unittest.TestCase):
     """Test figure generation for SCF, relaxation, and workflow history."""
 

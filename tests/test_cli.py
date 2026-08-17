@@ -1,3 +1,4 @@
+import importlib.util
 import io
 import json
 import tempfile
@@ -9,6 +10,13 @@ from qeanalyzer import __version__
 from qeanalyzer.cli import main
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+# The plot-producing commands need matplotlib, which lives in the optional
+# 'plot' extra; skip rather than fail when it is absent.
+REQUIRES_MATPLOTLIB = unittest.skipUnless(
+    importlib.util.find_spec("matplotlib") is not None,
+    "matplotlib is not installed (optional 'plot' extra)",
+)
 
 
 class TestCLI(unittest.TestCase):
@@ -112,6 +120,11 @@ class TestCLI(unittest.TestCase):
                 "--markdown",
             ]
             code = main(args)
+            self.assertEqual(code, 0)
+            self.assertTrue(out_file.exists())
+            self.assertIn("# Quantum ESPRESSO Run Analysis", out_file.read_text())
+
+    @REQUIRES_MATPLOTLIB
     def test_plot_scf_cli(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             out_png = Path(tmpdir) / "scf.png"
@@ -130,6 +143,7 @@ class TestCLI(unittest.TestCase):
             self.assertTrue(out_png.exists())
             self.assertIn("Saved scf convergence plot", buffer.getvalue())
 
+    @REQUIRES_MATPLOTLIB
     def test_plot_relax_cli(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             out_png = Path(tmpdir) / "relax.png"
@@ -146,6 +160,7 @@ class TestCLI(unittest.TestCase):
             self.assertTrue(out_png.exists())
             self.assertIn("Saved relax convergence plot", buffer.getvalue())
 
+    @REQUIRES_MATPLOTLIB
     def test_plot_history_cli(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             ledger_file = Path(tmpdir) / "workflow.json"
@@ -187,6 +202,7 @@ class TestCLI(unittest.TestCase):
             self.assertTrue(out_png3.exists())
             self.assertIn("Saved workflow history plot", buffer3.getvalue())
 
+    @REQUIRES_MATPLOTLIB
     def test_history_with_plot_flag_cli(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             ledger_file = Path(tmpdir) / "workflow.json"

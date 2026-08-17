@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,10 @@ from qeanalyzer.workflow import (
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+# matplotlib ships in the optional 'plot' extra. The pipeline stages around the
+# plotting step do not need it, so guard that step rather than the whole test.
+HAS_MATPLOTLIB = importlib.util.find_spec("matplotlib") is not None
+
 
 class TestEndToEndPipeline(unittest.TestCase):
     """Verify entire pipeline from DFT parsing to ADAPT-VQE and outer-loop convergence."""
@@ -56,8 +61,9 @@ class TestEndToEndPipeline(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             p_path = tmp_path / "scf_conv.png"
-            plot_scf_convergence(result, output_path=p_path)
-            self.assertTrue(p_path.exists())
+            if HAS_MATPLOTLIB:
+                plot_scf_convergence(result, output_path=p_path)
+                self.assertTrue(p_path.exists())
 
             # 4. Next-run decision and ledger
             ledger = WorkflowLedger(workflow_id="wf_silicon_01")
