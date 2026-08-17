@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gutama/qe-adapt-workflow/schemas/qe_run.schema.json",
+  "title": "QERunResult",
+  "description": "Schema for canonical Quantum ESPRESSO structured run records",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "calculation",
+    "status",
+    "provenance",
+    "electronic",
+    "convergence"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Version of the QERunResult schema"
+    },
+    "run_id": {
+      "type": ["string", "null"],
+      "description": "Unique identifier for this calculation run"
+    },
+    "parent_run": {
+      "type": ["string", "null"],
+      "description": "Identifier of the parent run in the workflow DAG"
+    },
+    "calculation": {
+      "type": "string",
+      "description": "Quantum ESPRESSO calculation type (scf, nscf, relax, vc-relax, bands, etc.)"
+    },
+    "status": {
+      "type": "object",
+      "required": ["completed", "scf_converged", "exit_status", "warnings", "errors"],
+      "properties": {
+        "completed": { "type": "boolean" },
+        "scf_converged": { "type": "boolean" },
+        "opt_converged": { "type": ["boolean", "null"] },
+        "exit_status": { "type": "string" },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "errors": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["schema_version", "engine", "qeanalyzer_version"],
+      "properties": {
+        "schema_version": { "type": "string" },
+        "run_id": { "type": ["string", "null"] },
+        "parent_run": { "type": ["string", "null"] },
+        "engine": {
+          "type": "object",
+          "required": ["name", "executable"],
+          "properties": {
+            "name": { "type": "string" },
+            "executable": { "type": "string" },
+            "version": { "type": ["string", "null"] }
+          }
+        },
+        "qeanalyzer_version": { "type": "string" },
+        "input_sha256": { "type": ["string", "null"] },
+        "pseudo_sha256": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "prefix": { "type": ["string", "null"] },
+        "outdir": { "type": ["string", "null"] },
+        "parallel": {
+          "type": "object",
+          "properties": {
+            "n_mpi_processes": { "type": ["integer", "null"] },
+            "n_threads": { "type": ["integer", "null"] }
+          }
+        },
+        "policy": {
+          "type": "object",
+          "properties": {
+            "name": { "type": ["string", "null"] },
+            "version": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "electronic": {
+      "type": "object",
+      "properties": {
+        "total_energy_ry": { "type": ["number", "null"] },
+        "total_energy_ev": { "type": ["number", "null"] },
+        "total_energy_hartree": { "type": ["number", "null"] },
+        "energy_components_ry": {
+          "type": "object",
+          "properties": {
+            "one_electron": { "type": ["number", "null"] },
+            "hartree": { "type": ["number", "null"] },
+            "xc": { "type": ["number", "null"] },
+            "ewald": { "type": ["number", "null"] },
+            "smearing": { "type": ["number", "null"] }
+          }
+        },
+        "fermi_energy_ev": { "type": ["number", "null"] },
+        "highest_occupied_ev": { "type": ["number", "null"] },
+        "lowest_unoccupied_ev": { "type": ["number", "null"] },
+        "band_gap_ev": { "type": ["number", "null"] },
+        "n_electrons": { "type": ["number", "null"] },
+        "n_bands": { "type": ["integer", "null"] },
+        "n_kpoints": { "type": ["integer", "null"] },
+        "is_metal": { "type": ["boolean", "null"] },
+        "spin": {
+          "type": "object",
+          "properties": {
+            "lsda": { "type": "boolean" },
+            "noncolin": { "type": "boolean" },
+            "spinorbit": { "type": "boolean" },
+            "total_magnetization": { "type": ["number", "null"] },
+            "absolute_magnetization": { "type": ["number", "null"] }
+          }
+        },
+        "eigenvalues_ev": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "number" }
+          }
+        },
+        "occupations": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "number" }
+          }
+        }
+      }
+    },
+    "structure": {
+      "type": ["object", "null"],
+      "properties": {
+        "alat_bohr": { "type": ["number", "null"] },
+        "alat_angstrom": { "type": ["number", "null"] },
+        "cell_vectors_bohr": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "cell_vectors_angstrom": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "volume_bohr3": { "type": ["number", "null"] },
+        "volume_angstrom3": { "type": ["number", "null"] },
+        "atoms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["symbol", "position_bohr", "position_angstrom"],
+            "properties": {
+              "symbol": { "type": "string" },
+              "position_bohr": {
+                "type": "array",
+                "items": { "type": "number" },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "position_angstrom": {
+                "type": "array",
+                "items": { "type": "number" },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "force_ry_bohr": {
+                "type": ["array", "null"],
+                "items": { "type": "number" },
+                "minItems": 3,
+                "maxItems": 3
+              }
+            }
+          }
+        },
+        "total_force_ry_bohr": { "type": ["number", "null"] },
+        "max_force_ry_bohr": { "type": ["number", "null"] },
+        "stress_kbar": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "pressure_kbar": { "type": ["number", "null"] }
+      }
+    },
+    "initial_structure": {
+      "type": ["object", "null"]
+    },
+    "convergence": {
+      "type": "object",
+      "properties": {
+        "n_scf_steps": { "type": ["integer", "null"] },
+        "scf_error": { "type": ["number", "null"] },
+        "n_scf_iterations": { "type": "integer" },
+        "scf_iterations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["iteration", "total_energy_ry", "accuracy_ry"],
+            "properties": {
+              "iteration": { "type": "integer" },
+              "total_energy_ry": { "type": "number" },
+              "accuracy_ry": { "type": "number" },
+              "diag_method": { "type": ["string", "null"] },
+              "ethr": { "type": ["number", "null"] },
+              "avg_diag_iterations": { "type": ["number", "null"] }
+            }
+          }
+        },
+        "n_bfgs_steps": { "type": ["integer", "null"] },
+        "n_ionic_steps": { "type": "integer" },
+        "timing": {
+          "type": "object",
+          "properties": {
+            "cpu_time_seconds": { "type": ["number", "null"] },
+            "wall_time_seconds": { "type": ["number", "null"] }
+          }
+        }
+      }
+    }
+  }
+}

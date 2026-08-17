@@ -3,11 +3,85 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 
 from . import __version__
+from .io import PWInput, PWOutput, QEXMLOutput, read_pw_input, read_pw_output, read_qe_xml
+from .models import build_run_result
+from .report import dump_result_json, save_result_json
+
+
+def _detect_and_load_sources(paths: list[str]) -> tuple[PWInput | None, PWOutput | None, QEXMLOutput | None, str | None]:
+    """Detect and parse inputs, outputs, and XML files from specified file or directory paths."""
+    pw_in: PWInput | None = None
+    pw_out: PWOutput | None = None
+    qe_xml: QEXMLOutput | None = None
+    input_text: str | None = None
+
+    all_files: list[Path] = []
+    for p_str in paths:
+        p = Path(p_str)
+        if p.is_dir():
+            # Scan directory for relevant files
+            for f in p.glob("**/*"):
+                if f.is_file():
+                    all_files.append(f)
+        elif p.is_file():
+            all_files.append(p)
+
+    for f in all_files:
+        name = f.name.lower()
+        if name.endswith(".xml") or name == "data-file-schema.xml":
+            if qe_xml is None:
+                try:
+                    qe_xml = read_qe_xml(f)
+                except Exception:
+                    pass
+        elif name.endswith(".out") or name.endswith(".log"):
+            if pw_out is None:
+                try:
+                    pw_out = read_pw_output(f)
+                except Exception:
+                    pass
+        elif name.endswith(".in") or name.endswith(".pwi"):
+            if pw_in is None:
+                try:
+                    input_text = f.read_text()
+                    pw_in = read_pw_input(f)
+                except Exception:
+                    pass
+
+    return pw_in, pw_out, qe_xml, input_text
+
+
+def cmd_dump(args: argparse.Namespace) -> int:
+    """Handle `qeanalyzer dump` subcommand."""
+    pw_in, pw_out, qe_xml, input_text = _detect_and_load_sources(args.paths)
+
+    if not pw_in and not pw_out and not qe_xml:
+        sys.stderr.write("Error: No valid Quantum ESPRESSO input (.in), output (.out), or XML (.xml) files found.\n")
+        return 1
+
+    result = build_run_result(
+        pw_in=pw_in,
+        pw_out=pw_out,
+        qe_xml=qe_xml,
+        run_id=args.run_id,
+        parent_run=args.parent_run,
+        input_text=input_text,
+    )
+
+    if args.output:
+        save_result_json(result, args.output, indent=args.indent)
+    else:
+        sys.stdout.write(dump_result_json(result, indent=args.indent))
+
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build root CLI argument parser."""
     parser = argparse.ArgumentParser(
         prog="qeanalyzer",
         description=(
@@ -20,12 +94,49 @@ def build_parser() -> argparse.ArgumentParser:
         action="version",
         version=f"%(prog)s {__version__}",
     )
+
+    subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
+
+    # dump subcommand
+    dump_parser = subparsers.add_parser(
+        "dump",
+        help="Parse calculation files and dump structured canonical JSON record",
+    )
+    dump_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Paths to calculation files (pw.in, pw.out, data-file-schema.xml) or directories",
+    )
+    dump_parser.add_argument(
+        "-o", "--output",
+        help="Output destination path for the generated result.json",
+    )
+    dump_parser.add_argument(
+        "--run-id",
+        help="Optional unique calculation run identifier",
+    )
+    dump_parser.add_argument(
+        "--parent-run",
+        help="Optional parent run identifier in the workflow DAG",
+    )
+    dump_parser.add_argument(
+        "--indent",
+        type=int,
+        default=2,
+        help="Indentation spaces for JSON output (default: 2)",
+    )
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Main CLI entrypoint."""
     parser = build_parser()
-    parser.parse_args(argv)
+    args = parser.parse_args(argv)
+
+    if args.command == "dump":
+        return cmd_dump(args)
+
     parser.print_help()
     return 0
 
