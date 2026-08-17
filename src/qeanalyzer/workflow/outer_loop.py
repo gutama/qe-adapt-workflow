@@ -142,7 +142,8 @@ class OuterLoopLedger:
         q_e = quantum_result.energy_ev
         total_e = q_e  # Total correlated ground-state energy
 
-        max_grad = max(quantum_result.operator_gradients) if quantum_result.operator_gradients else 0.0
+        # Residual commutator gradient after ADAPT-VQE iterations
+        residual_grad = quantum_result.operator_gradients[-1] if quantum_result.operator_gradients else 0.0
 
         rec = OuterLoopIterationRecord(
             iteration_index=idx,
@@ -153,7 +154,7 @@ class OuterLoopLedger:
             one_rdm=quantum_result.one_rdm,
             natural_occupations=quantum_result.natural_occupations,
             adapt_operators=quantum_result.selected_operators,
-            max_gradient=round(max_grad, 8) if max_grad is not None else None,
+            max_gradient=round(residual_grad, 8) if residual_grad is not None else None,
             metadata=metadata or {},
         )
         self.iterations.append(rec)
