@@ -9,7 +9,7 @@ from pathlib import Path
 from . import __version__
 from .io import PWInput, PWOutput, QEXMLOutput, read_pw_input, read_pw_output, read_qe_xml
 from .models import build_run_result
-from .plotting import plot_relaxation_convergence, plot_scf_convergence
+from .plotting import plot_relaxation_convergence, plot_scf_convergence, plot_workflow_history
 from .report import dump_result_json, generate_text_report, save_result_json, save_text_report
 from .workflow import WorkflowLedger, default_registry, plan_next_calculation
 
@@ -111,10 +111,25 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def cmd_plot(args: argparse.Namespace) -> int:
     """Handle `qeanalyzer plot` subcommand."""
+    # Check if this is a workflow history plot
+    if getattr(args, "what", None) == "history" or (len(args.paths) == 1 and Path(args.paths[0]).suffix.lower() == ".json"):
+        potential_path = Path(args.paths[0])
+        if potential_path.is_file():
+            try:
+                ledger = WorkflowLedger.load_json(potential_path)
+                output_path = args.output or "workflow_history.png"
+                plot_workflow_history(ledger, output_path=output_path, title=args.title, dpi=args.dpi)
+                sys.stdout.write(f"Saved workflow history plot to {output_path}\n")
+                return 0
+            except Exception as exc:
+                if getattr(args, "what", None) == "history":
+                    sys.stderr.write(f"Error generating workflow history plot: {exc}\n")
+                    return 1
+
     pw_in, pw_out, qe_xml, input_text = _detect_and_load_sources(args.paths)
 
     if not pw_in and not pw_out and not qe_xml:
-        sys.stderr.write("Error: No valid Quantum ESPRESSO input (.in), output (.out), or XML (.xml) files found.\n")
+        sys.stderr.write("Error: No valid Quantum ESPRESSO input (.in), output (.out), XML (.xml), or ledger (.json) files found.\n")
         return 1
 
     result = build_run_result(
@@ -144,7 +159,7 @@ def cmd_plot(args: argparse.Namespace) -> int:
         elif what in ("relax", "vc-relax"):
             plot_relaxation_convergence(result, output_path=output_path, title=args.title, dpi=args.dpi)
         else:
-            sys.stderr.write(f"Error: Unknown plot target '{what}'. Choose 'scf' or 'relax'.\n")
+            sys.stderr.write(f"Error: Unknown plot target '{what}'. Choose 'scf', 'relax', or 'history'.\n")
             return 1
     except Exception as exc:
         sys.stderr.write(f"Error generating plot: {exc}\n")
@@ -152,6 +167,24 @@ def cmd_plot(args: argparse.Namespace) -> int:
 
     sys.stdout.write(f"Saved {what} convergence plot to {output_path}\n")
     return 0
+
+
+def cmd_plot_history(args: argparse.Namespace) -> int:
+    """Handle `qeanalyzer plot-history` subcommand."""
+    l_path = Path(args.ledger)
+    if not l_path.exists():
+        sys.stderr.write(f"Error: Ledger file not found at '{args.ledger}'\n")
+        return 1
+
+    try:
+        ledger = WorkflowLedger.load_json(l_path)
+        output_path = args.output or "workflow_history.png"
+        plot_workflow_history(ledger, output_path=output_path, title=args.title, dpi=args.dpi)
+        sys.stdout.write(f"Saved workflow history plot to {output_path}\n")
+        return 0
+    except Exception as exc:
+        sys.stderr.write(f"Error generating workflow history plot: {exc}\n")
+        return 1
 
 
 def cmd_next(args: argparse.Namespace) -> int:
@@ -222,6 +255,15 @@ def cmd_history(args: argparse.Namespace) -> int:
         parent = r.parent_run or "-"
         policy = r.policy_applied or "-"
         sys.stdout.write(f"{r.run_id:<15} {r.calculation:<10} {parent:<15} {r.status:<12} {policy:<15}\n")
+
+    if getattr(args, "plot", None):
+        try:
+            plot_path = args.plot
+            plot_workflow_history(ledger, output_path=plot_path, dpi=getattr(args, "dpi", 300))
+            sys.stdout.write(f"Saved workflow history plot to {plot_path}\n")
+        except Exception as exc:
+            sys.stderr.write(f"Error generating workflow history plot: {exc}\n")
+            return 1
 
     return 0
 
@@ -327,16 +369,16 @@ def build_parser() -> argparse.ArgumentParser:
     plot_parser.add_argument(
         "paths",
         nargs="+",
-        help="Paths to calculation files (pw.out, data-file-schema.xml) or directories",
+        help="Paths to calculation files (pw.out, data-file-schema.xml, workflow.json) or directories",
     )
     plot_parser.add_argument(
         "-o", "--output",
-        help="Output destination path for the plot figure (e.g. scf_conv.png)",
+        help="Output destination path for the plot figure (e.g. scf_conv.png, workflow_history.png)",
     )
     plot_parser.add_argument(
         "--what",
-        choices=["scf", "relax"],
-        help="Type of convergence plot to generate ('scf' or 'relax')",
+        choices=["scf", "relax", "history"],
+        help="Type of convergence plot to generate ('scf', 'relax', or 'history')",
     )
     plot_parser.add_argument(
         "--title",
@@ -355,6 +397,33 @@ def build_parser() -> argparse.ArgumentParser:
     plot_parser.add_argument(
         "--parent-run",
         help="Optional parent run identifier in the workflow DAG",
+    )
+
+    # plot-history subcommand
+    plot_hist_parser = subparsers.add_parser(
+        "plot-history",
+        help="Generate workflow lineage and multi-run history visualization plot",
+    )
+    plot_hist_parser.add_argument(
+        "ledger",
+        nargs="?",
+        default="workflow.json",
+        help="Path to workflow.json ledger file (default: 'workflow.json')",
+    )
+    plot_hist_parser.add_argument(
+        "-o", "--output",
+        default="workflow_history.png",
+        help="Output destination path for the history plot (default: 'workflow_history.png')",
+    )
+    plot_hist_parser.add_argument(
+        "--title",
+        help="Custom figure title",
+    )
+    plot_hist_parser.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="Image resolution DPI (default: 300)",
     )
 
     # next subcommand
@@ -407,6 +476,16 @@ def build_parser() -> argparse.ArgumentParser:
         default="workflow.json",
         help="Path to workflow.json ledger file (default: 'workflow.json')",
     )
+    hist_parser.add_argument(
+        "--plot",
+        help="Optional path to save workflow history visualization plot",
+    )
+    hist_parser.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="Image resolution DPI for plot (default: 300)",
+    )
 
     # validate subcommand
     val_parser = subparsers.add_parser(
@@ -434,6 +513,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_report(args)
     if args.command == "plot":
         return cmd_plot(args)
+    if args.command == "plot-history":
+        return cmd_plot_history(args)
     if args.command == "next":
         return cmd_next(args)
     if args.command == "history":

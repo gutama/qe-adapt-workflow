@@ -140,6 +140,75 @@ class TestCLI(unittest.TestCase):
                 str(out_png),
             ]
             buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = main(args)
+            self.assertEqual(code, 0)
+            self.assertTrue(out_png.exists())
+            self.assertIn("Saved relax convergence plot", buffer.getvalue())
+
+    def test_plot_history_cli(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_file = Path(tmpdir) / "workflow.json"
+            out_png = Path(tmpdir) / "history.png"
+
+            # Create workflow step to have a populated ledger
+            main([
+                "next",
+                str(FIXTURES / "si_scf.in"),
+                str(FIXTURES / "si_scf.out"),
+                "--ledger",
+                str(ledger_file),
+                "-o",
+                str(Path(tmpdir) / "002_nscf"),
+            ])
+
+            # 1. qeanalyzer plot workflow.json -o history.png
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = main(["plot", str(ledger_file), "-o", str(out_png)])
+            self.assertEqual(code, 0)
+            self.assertTrue(out_png.exists())
+            self.assertIn("Saved workflow history plot", buffer.getvalue())
+
+            # 2. qeanalyzer plot workflow.json --what history -o history2.png
+            out_png2 = Path(tmpdir) / "history2.png"
+            buffer2 = io.StringIO()
+            with redirect_stdout(buffer2):
+                code2 = main(["plot", str(ledger_file), "--what", "history", "-o", str(out_png2)])
+            self.assertEqual(code2, 0)
+            self.assertTrue(out_png2.exists())
+
+            # 3. qeanalyzer plot-history workflow.json -o history3.png
+            out_png3 = Path(tmpdir) / "history3.png"
+            buffer3 = io.StringIO()
+            with redirect_stdout(buffer3):
+                code3 = main(["plot-history", str(ledger_file), "-o", str(out_png3)])
+            self.assertEqual(code3, 0)
+            self.assertTrue(out_png3.exists())
+            self.assertIn("Saved workflow history plot", buffer3.getvalue())
+
+    def test_history_with_plot_flag_cli(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_file = Path(tmpdir) / "workflow.json"
+            out_png = Path(tmpdir) / "history.png"
+
+            main([
+                "next",
+                str(FIXTURES / "si_scf.in"),
+                str(FIXTURES / "si_scf.out"),
+                "--ledger",
+                str(ledger_file),
+                "-o",
+                str(Path(tmpdir) / "002_nscf"),
+            ])
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = main(["history", str(ledger_file), "--plot", str(out_png)])
+            self.assertEqual(code, 0)
+            self.assertTrue(out_png.exists())
+            self.assertIn("Saved workflow history plot", buffer.getvalue())
+
     def test_next_cli(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             out_dir = Path(tmpdir) / "002_nscf"
