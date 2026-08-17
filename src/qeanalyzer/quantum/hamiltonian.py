@@ -87,13 +87,15 @@ class MaterialHamiltonian:
                 if abs(self.h1[p][q] - self.h1[q][p]) > tolerance:
                     return False
 
-        # Check 2-body 8-fold real symmetry: (pr|qs) == (rp|sq) == (qs|pr) == (sq|rp)
+        # Check 2-body 8-fold real symmetry: (pq|rs) == (qp|rs) == (pq|sr) == (rs|pq)
         for p in range(norb):
             for q in range(norb):
                 for r in range(norb):
                     for s in range(norb):
                         val = self.h2[p][q][r][s]
-                        if abs(val - self.h2[q][p][s][r]) > tolerance:
+                        if abs(val - self.h2[q][p][r][s]) > tolerance:
+                            return False
+                        if abs(val - self.h2[p][q][s][r]) > tolerance:
                             return False
                         if abs(val - self.h2[r][s][p][q]) > tolerance:
                             return False
@@ -117,7 +119,7 @@ class MaterialHamiltonian:
         -------
         h1_spin : 2D list of shape (2*norb, 2*norb)
         h2_spin : 4D list of shape (2*norb, 2*norb, 2*norb, 2*norb)
-            In physicists' anti-symmetrized convention: <pq||rs> = <pq|rs> - <pq|sr>
+            In physicists' anti-symmetrized convention: <pr||qs> = <pr|qs> - <pr|sq>
         """
         n_so = self.n_spin_orbitals
         norb = self.n_orbitals
@@ -132,28 +134,30 @@ class MaterialHamiltonian:
                 h1_so[2 * p][2 * q] = val          # alpha-alpha
                 h1_so[2 * p + 1][2 * q + 1] = val  # beta-beta
 
-        # 2-body spin conversion in anti-symmetrized physicists' notation <pq||rs>
-        # <p_sigma, q_tau | r_sigma', s_tau'> = (pr | qs) delta_{sigma, sigma'} delta_{tau, tau'}
+        # 2-body spin conversion in anti-symmetrized physicists' notation <pr||qs>
+        # <p_s1, r_s2 | q_s1, s_s2> = (pq|rs)
         for p in range(norb):
             for q in range(norb):
                 for r in range(norb):
                     for s in range(norb):
-                        chem_val = self.h2[p][q][r][s]  # (pr|qs)
+                        chem_val = self.h2[p][q][r][s]  # (pq|rs)
+                        if abs(chem_val) < 1e-12:
+                            continue
 
                         # alpha-alpha / beta-beta pairs
                         for s1 in (0, 1):
                             for s2 in (0, 1):
                                 p_idx = 2 * p + s1
-                                q_idx = 2 * q + s2
-                                r_idx = 2 * r + s1
+                                r_idx = 2 * r + s2
+                                q_idx = 2 * q + s1
                                 s_idx = 2 * s + s2
 
-                                # Direct term: <p_idx, q_idx | r_idx, s_idx>
-                                h2_so[p_idx][q_idx][r_idx][s_idx] += chem_val
+                                # Direct term: <p_idx, r_idx | q_idx, s_idx>
+                                h2_so[p_idx][r_idx][q_idx][s_idx] += chem_val
 
-                                # Exchange term if same spin: - <p_idx, q_idx | s_idx, r_idx>
+                                # Exchange term if same spin: - <p_idx, r_idx | s_idx, q_idx>
                                 if s1 == s2:
-                                    h2_so[p_idx][q_idx][s_idx][r_idx] -= chem_val
+                                    h2_so[p_idx][r_idx][s_idx][q_idx] -= chem_val
 
         return h1_so, h2_so
 

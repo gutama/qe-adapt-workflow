@@ -10,6 +10,7 @@ from . import __version__
 from .io import PWInput, PWOutput, QEXMLOutput, read_pw_input, read_pw_output, read_qe_xml
 from .models import build_run_result
 from .plotting import plot_relaxation_convergence, plot_scf_convergence, plot_workflow_history
+from .quantum import build_active_space_hamiltonian, select_active_space, write_fcidump
 from .report import dump_result_json, generate_text_report, save_result_json, save_text_report
 from .workflow import WorkflowLedger, default_registry, plan_next_calculation
 
@@ -282,9 +283,62 @@ def cmd_validate(args: argparse.Namespace) -> int:
         for err in errors:
             sys.stderr.write(f"  - {err}\n")
         return 1
-
     sys.stdout.write(f"Workflow ledger '{args.ledger}' is VALID ({len(ledger.runs)} runs, clean DAG).\n")
     return 0
+
+
+def cmd_export_fcidump(args: argparse.Namespace) -> int:
+    """Handle `qeanalyzer export-fcidump` subcommand."""
+    pw_in, pw_out, qe_xml, input_text = _detect_and_load_sources(args.paths)
+
+    if not pw_in and not pw_out and not qe_xml:
+        sys.stderr.write("Error: No valid Quantum ESPRESSO calculation files found to build Hamiltonian.\n")
+        return 1
+
+    result = build_run_result(
+        pw_in=pw_in,
+        pw_out=pw_out,
+        qe_xml=qe_xml,
+        input_text=input_text,
+    )
+
+    try:
+        if args.active_method == "band_index":
+            asp = select_active_space(
+                result,
+                method="band_index",
+                band_start=args.band_start,
+                band_end=args.band_end,
+            )
+        elif args.active_method == "occupation":
+            asp = select_active_space(
+                result,
+                method="occupation",
+                min_occ=args.min_occ,
+                max_occ=args.max_occ,
+            )
+        else:
+            asp = select_active_space(
+                result,
+                method="energy_window",
+                emin_ev=args.emin,
+                emax_ev=args.emax,
+            )
+
+        ham = build_active_space_hamiltonian(
+            state=result,
+            active_space=asp,
+            onsite_u_ev=args.u,
+            intersite_v_ev=args.v,
+        )
+
+        out_path = args.output or "hamiltonian.fcidump"
+        write_fcidump(ham, path=out_path)
+        sys.stdout.write(f"Exported FCIDUMP to {out_path} ({asp.summary()})\n")
+        return 0
+    except Exception as exc:
+        sys.stderr.write(f"Error exporting FCIDUMP: {exc}\n")
+        return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -499,6 +553,74 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to workflow.json ledger file (default: 'workflow.json')",
     )
 
+    # export-fcidump subcommand
+    fci_parser = subparsers.add_parser(
+        "export-fcidump",
+        help="Construct active-space Hamiltonian and export to FCIDUMP format",
+    )
+    fci_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Paths to calculation files (pw.out, data-file-schema.xml) or directories",
+    )
+    fci_parser.add_argument(
+        "-o", "--output",
+        default="hamiltonian.fcidump",
+        help="Output destination path for FCIDUMP file (default: 'hamiltonian.fcidump')",
+    )
+    fci_parser.add_argument(
+        "--active-method",
+        choices=["energy_window", "band_index", "occupation"],
+        default="energy_window",
+        help="Active space selection strategy (default: 'energy_window')",
+    )
+    fci_parser.add_argument(
+        "--emin",
+        type=float,
+        default=-3.0,
+        help="Energy window minimum relative to Fermi level (eV, default: -3.0)",
+    )
+    fci_parser.add_argument(
+        "--emax",
+        type=float,
+        default=3.0,
+        help="Energy window maximum relative to Fermi level (eV, default: 3.0)",
+    )
+    fci_parser.add_argument(
+        "--band-start",
+        type=int,
+        help="Starting band index for band_index strategy (0-indexed)",
+    )
+    fci_parser.add_argument(
+        "--band-end",
+        type=int,
+        help="Ending band index for band_index strategy (0-indexed)",
+    )
+    fci_parser.add_argument(
+        "--min-occ",
+        type=float,
+        default=0.01,
+        help="Minimum occupation for occupation strategy (default: 0.01)",
+    )
+    fci_parser.add_argument(
+        "--max-occ",
+        type=float,
+        default=1.99,
+        help="Maximum occupation for occupation strategy (default: 1.99)",
+    )
+    fci_parser.add_argument(
+        "-u", "--u",
+        type=float,
+        default=0.0,
+        help="Effective onsite Hubbard U interaction (eV, default: 0.0)",
+    )
+    fci_parser.add_argument(
+        "-v", "--v",
+        type=float,
+        default=0.0,
+        help="Effective intersite Coulomb V interaction (eV, default: 0.0)",
+    )
+
     return parser
 
 
@@ -521,6 +643,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_history(args)
     if args.command == "validate":
         return cmd_validate(args)
+    if args.command == "export-fcidump":
+        return cmd_export_fcidump(args)
 
     parser.print_help()
     return 0

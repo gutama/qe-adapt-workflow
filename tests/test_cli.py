@@ -262,6 +262,34 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(val_code, 0)
             self.assertIn("is VALID", val_buf.getvalue())
 
+    def test_export_fcidump_cli(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_fci = Path(tmpdir) / "model.fcidump"
+            args = [
+                "export-fcidump",
+                str(FIXTURES / "si_scf.xml"),
+                "-o",
+                str(out_fci),
+                "--active-method",
+                "band_index",
+                "--band-start",
+                "1",
+                "--band-end",
+                "2",
+                "-u",
+                "2.0",
+            ]
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = main(args)
+
+            self.assertEqual(code, 0)
+            self.assertTrue(out_fci.exists())
+            self.assertIn("Exported FCIDUMP", buffer.getvalue())
+            content = out_fci.read_text()
+            self.assertIn("&FCI", content)
+            self.assertIn("NORB=2", content)
+
 
 if __name__ == "__main__":
     unittest.main()

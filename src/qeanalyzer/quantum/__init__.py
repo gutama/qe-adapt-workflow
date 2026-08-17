@@ -10,6 +10,11 @@ from qeanalyzer.quantum.active_space import (
     create_active_space_selector,
     select_active_space,
 )
+from qeanalyzer.quantum.fcidump import (
+    parse_fcidump,
+    read_fcidump,
+    write_fcidump,
+)
 from qeanalyzer.quantum.hamiltonian import (
     MaterialHamiltonian,
     build_active_space_hamiltonian,
@@ -27,5 +32,8 @@ __all__ = [
     "build_active_space_hamiltonian",
     "build_hubbard_hamiltonian",
     "create_active_space_selector",
+    "parse_fcidump",
+    "read_fcidump",
     "select_active_space",
+    "write_fcidump",
 ]
