@@ -263,7 +263,11 @@ def build_hubbard_hamiltonian(
     n_electrons : float
         Total number of electrons.
     hopping_t : dict or 2D list, optional
-        Hopping amplitudes t_ij between sites (e.g. {(0, 1): -1.0, (1, 0): -1.0}).
+        Hopping amplitudes t_ij between sites, e.g. ``{(0, 1): 1.0, (1, 0): 1.0}``.
+        Off-diagonal entries follow ``H = -t sum_<ij> c_i^+ c_j``, so ``t_ij`` enters
+        ``h1`` as ``-t_ij``; the sign supplied here is preserved, and a negative
+        ``t_ij`` therefore yields a positive ``h1`` element. Diagonal entries are
+        treated as on-site energies and are copied through unchanged.
     onsite_u : float or list of float, optional
         Onsite Coulomb repulsion U_i (eV).
     intersite_v : dict, optional
@@ -293,10 +297,13 @@ def build_hubbard_hamiltonian(
                     if abs(val) > 1e-9:
                         hop_dict[(i, j)] = val
 
-    # Fill 1-body matrix h1
+    # Fill 1-body matrix h1 under the standard convention H = -t sum_<ij> c_i^+ c_j,
+    # applied unconditionally so the sign of t is preserved: t = +1 and t = -1 are
+    # physically distinct models and must not collapse onto the same h1.
+    # Diagonal entries are on-site energies and are taken as given.
     for (i, j), t_val in hop_dict.items():
         if 0 <= i < n_orbitals and 0 <= j < n_orbitals:
-            h1[i][j] = -t_val if t_val > 0 and (i != j) else t_val
+            h1[i][j] = -t_val if i != j else t_val
 
     # Parse onsite_u
     u_list = [0.0] * n_orbitals

@@ -130,13 +130,38 @@ class BaseRunner(ABC):
         working_dir: str | Path | None = None,
         poll_interval_seconds: float = 0.5,
         timeout_seconds: float | None = None,
+        max_unknown_polls: int = 10,
     ) -> JobStatus:
-        """Poll and wait until job execution is finished or timeout expires."""
+        """Poll and wait until job execution is finished or timeout expires.
+
+        An UNKNOWN state is never terminal, but it is also not progress: a job the
+        backend cannot identify will never reach a finished state, so repeated
+        UNKNOWN polls would otherwise spin forever when *timeout_seconds* is None.
+        After *max_unknown_polls* consecutive UNKNOWN results the wait gives up and
+        reports FAILED. A single transient UNKNOWN does not end the wait, since the
+        counter resets as soon as any other state is observed.
+        """
         start_time = time.time()
+        unknown_polls = 0
         while True:
             st = self.status(job_id, working_dir=working_dir)
             if st.is_finished():
                 return st
+
+            if st.state == "UNKNOWN":
+                unknown_polls += 1
+                if unknown_polls >= max_unknown_polls:
+                    return JobStatus(
+                        job_id=job_id,
+                        state="FAILED",
+                        error_message=(
+                            f"Job state was UNKNOWN on {unknown_polls} consecutive polls; "
+                            "the backend cannot identify this job. "
+                            + (st.error_message or "")
+                        ).strip(),
+                    )
+            else:
+                unknown_polls = 0
 
             if timeout_seconds is not None and (time.time() - start_time) > timeout_seconds:
                 self.cancel(job_id)

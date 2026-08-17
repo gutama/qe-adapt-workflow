@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from qeanalyzer.models import QERunResult
+
+
+def _paired(
+    steps: Sequence[Any],
+    value_of: Callable[[Any], float | None],
+) -> tuple[list[int], list[float]]:
+    """Return (step numbers, values) keeping only steps where the value is present.
+
+    Filtering as pairs keeps each point anchored to the ionic step it came from,
+    which slicing a shared x-list positionally does not.
+    """
+    pairs = [(s.step, value_of(s)) for s in steps]
+    kept = [(step, value) for step, value in pairs if value is not None]
+    return [step for step, _ in kept], [value for _, value in kept]
 
 
 def _check_matplotlib() -> Any:
@@ -122,9 +137,12 @@ def plot_relaxation_convergence(
     if not steps:
         raise ValueError("No ionic relaxation step history available in the provided run result.")
 
-    step_nums = [s.step for s in steps]
-    energies = [s.total_energy_ry for s in steps if s.total_energy_ry is not None]
-    forces = [s.total_force for s in steps if s.total_force is not None]
+    # Each series is filtered as (step, value) pairs. Filtering the values alone and
+    # slicing the step list positionally would shift points onto the wrong ionic
+    # step whenever an earlier step is missing that quantity -- and by a different
+    # amount in each panel, since the gaps need not coincide.
+    energy_steps, energies = _paired(steps, lambda s: s.total_energy_ry)
+    force_steps, forces = _paired(steps, lambda s: s.total_force)
 
     n_subplots = 2
     has_stress = any(s.stress is not None for s in steps)
@@ -136,7 +154,7 @@ def plot_relaxation_convergence(
         axes = [axes]
 
     # 1. Total Energy vs Ionic Step
-    axes[0].plot(step_nums[:len(energies)], energies, marker="o", color="#1f77b4", linewidth=1.5, markersize=5)
+    axes[0].plot(energy_steps, energies, marker="o", color="#1f77b4", linewidth=1.5, markersize=5)
     axes[0].set_ylabel("Total Energy (Ry)", fontsize=10)
     axes[0].grid(True, linestyle="--", alpha=0.6)
     run_label = f"[{result.run_id}] " if result.run_id else ""
@@ -144,14 +162,16 @@ def plot_relaxation_convergence(
 
     # 2. Total / Max Force vs Ionic Step
     if forces:
-        axes[1].plot(step_nums[:len(forces)], forces, marker="^", color="#ff7f0e", linewidth=1.5, markersize=5)
+        axes[1].plot(force_steps, forces, marker="^", color="#ff7f0e", linewidth=1.5, markersize=5)
         axes[1].set_ylabel("Total Force (Ry/Bohr)", fontsize=10)
         axes[1].grid(True, linestyle="--", alpha=0.6)
 
     # 3. Pressure (if vc-relax)
     if has_stress:
-        pressures = [s.stress.pressure_kbar for s in steps if s.stress is not None]
-        axes[2].plot(step_nums[:len(pressures)], pressures, marker="s", color="#2ca02c", linewidth=1.5, markersize=5)
+        pressure_steps, pressures = _paired(
+            steps, lambda s: s.stress.pressure_kbar if s.stress is not None else None
+        )
+        axes[2].plot(pressure_steps, pressures, marker="s", color="#2ca02c", linewidth=1.5, markersize=5)
         axes[2].set_ylabel("Pressure (kbar)", fontsize=10)
         axes[2].grid(True, linestyle="--", alpha=0.6)
 

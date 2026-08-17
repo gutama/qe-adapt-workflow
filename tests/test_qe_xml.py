@@ -202,7 +202,7 @@ class TestXMLParserEdgeCases(unittest.TestCase):
 
 _XML_HEAD = (
     "<qes:espresso xmlns:qes='http://www.quantum-espresso.org/ns/qes/qes-1.0' "
-    "SCHEMA_VERSION='23.02.00'>"
+    "SCHEMA_VERSION='1.0.0'>"
 )
 
 
@@ -280,6 +280,52 @@ class TestXMLStressUnitsAndSign(unittest.TestCase):
             sum(self.out.stress_kbar[i][i] for i in range(3)) / 3.0,
             places=9,
         )
+
+class TestMalformedNumericBlocksDegradeGracefully(unittest.TestCase):
+    """One bad token must not cost the caller the rest of the file.
+
+    QE prints '*****' when a value overflows its Fortran field width. The
+    k-point and eigenvalue paths already tolerate that; forces and stress must
+    too, rather than aborting the parse and discarding energies and bands.
+    """
+
+    OVERFLOW_XML = (
+        f"{_XML_HEAD}<output>"
+        "<convergence_info><scf_conv>"
+        "<convergence_achieved>true</convergence_achieved>"
+        "<n_scf_steps>8</n_scf_steps></scf_conv></convergence_info>"
+        "<total_energy><etot>-7.92717283</etot></total_energy>"
+        "<stress units='Hartree/Bohr**3'>\n"
+        "***** 0.000000e+00 0.000000e+00\n"
+        "0.000000e+00 -1.000000e-04 0.000000e+00\n"
+        "0.000000e+00 0.000000e+00 -1.000000e-04\n"
+        "</stress>"
+        "</output></qes:espresso>"
+    )
+
+    BAD_FORCES_XML = (
+        f"{_XML_HEAD}<output>"
+        "<total_energy><etot>-7.92717283</etot></total_energy>"
+        "<forces>\n0.0 0.0 nonsense\n0.0 0.0 -1.0e-3\n</forces>"
+        "</output></qes:espresso>"
+    )
+
+    def test_overflow_marker_does_not_abort_the_parse(self):
+        out = parse_qe_xml(self.OVERFLOW_XML)
+        self.assertAlmostEqual(out.total_energy_hartree, -7.92717283)
+        self.assertIs(out.scf_converged, True)
+        self.assertEqual(out.n_scf_steps, 8)
+
+    def test_unparsable_stress_row_is_skipped_not_fatal(self):
+        out = parse_qe_xml(self.OVERFLOW_XML)
+        # Only two of three rows survive, so no full tensor is reported.
+        self.assertIsNone(out.stress_kbar)
+
+    def test_unparsable_force_row_is_skipped(self):
+        out = parse_qe_xml(self.BAD_FORCES_XML)
+        self.assertAlmostEqual(out.total_energy_hartree, -7.92717283)
+        self.assertEqual(len(out.forces_hartree_bohr), 1)
+        self.assertAlmostEqual(out.forces_hartree_bohr[0][2], -1.0e-3)
 
 
 if __name__ == "__main__":

@@ -440,7 +440,13 @@ def parse_qe_xml(xml_content: str) -> QEXMLOutput:
             f_text = _text(forces_elem) or ""
             forces_list: list[tuple[float, float, float]] = []
             for line in f_text.split("\n"):
-                parts = [float(x) for x in line.split()]
+                # One unparsable token (e.g. the '*****' overflow marker QE emits
+                # when a value exceeds its field width) must not abort the whole
+                # parse and lose the energies and bands that read fine.
+                try:
+                    parts = [float(x) for x in line.split()]
+                except ValueError:
+                    continue
                 if len(parts) >= 3:
                     forces_list.append((parts[0], parts[1], parts[2]))
             if forces_list:
@@ -452,7 +458,10 @@ def parse_qe_xml(xml_content: str) -> QEXMLOutput:
             s_text = _text(stress_elem) or ""
             stress_rows_ha: list[list[float]] = []
             for line in s_text.split("\n"):
-                parts = [float(x) for x in line.split()]
+                try:
+                    parts = [float(x) for x in line.split()]
+                except ValueError:
+                    continue
                 if len(parts) >= 3:
                     stress_rows_ha.append([parts[0], parts[1], parts[2]])
             if len(stress_rows_ha) >= 3:

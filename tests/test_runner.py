@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from qeanalyzer.runner import (
     BaseRunner,
@@ -140,15 +143,17 @@ class TestSlurmRunner(unittest.TestCase):
             self.assertEqual(status.state, "QUEUED")
             self.assertTrue((Path(tmpdir) / "submit_test_mock_job.sh").exists())
 
-            # Check status
+            # A simulated job reaches a terminal state once polled; staying QUEUED
+            # forever would make wait() spin indefinitely on a valid job id.
             st = runner.status(status.job_id)
-            self.assertEqual(st.state, "QUEUED")
+            self.assertEqual(st.state, "COMPLETED")
+            self.assertTrue(st.is_finished())
 
-            # Cancel
-            cancelled = runner.cancel(status.job_id)
-            self.assertTrue(cancelled)
-            st_after = runner.status(status.job_id)
-            self.assertEqual(st_after.state, "CANCELLED")
+            # Cancel a freshly submitted (still queued) job
+            other = runner.submit(RunSpec(working_dir=tmpdir, job_name="test_cancel_job"))
+            self.assertEqual(other.state, "QUEUED")
+            self.assertTrue(runner.cancel(other.job_id))
+            self.assertEqual(runner.status(other.job_id).state, "CANCELLED")
 
 
 class TestMockRunnerAndFactory(unittest.TestCase):
@@ -178,6 +183,73 @@ class TestMockRunnerAndFactory(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             create_runner("unsupported_runner_type")
+
+class TestSlurmDoesNotFakeSubmission(unittest.TestCase):
+    """Mock mode must be asked for, and an unknown job is not a successful one."""
+
+    def test_missing_sbatch_fails_instead_of_silently_mocking(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = SlurmRunner(partition="compute")
+            self.assertFalse(runner.mock_mode)
+
+            with mock.patch("qeanalyzer.runner.slurm.shutil.which", return_value=None):
+                status = runner.submit(RunSpec(working_dir=tmpdir, job_name="real_job"))
+
+            self.assertEqual(status.state, "FAILED")
+            self.assertIn("sbatch", status.error_message)
+            # The script is still staged so the user can submit it by hand.
+            self.assertTrue((Path(tmpdir) / "submit_real_job.sh").exists())
+
+    def test_job_unknown_to_squeue_and_sacct_is_not_reported_completed(self):
+        # Pretend sbatch exists so the real squeue/sacct path is exercised rather
+        # than any mock branch, then have both report nothing about the job.
+        empty = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with mock.patch("qeanalyzer.runner.slurm.shutil.which", return_value="/usr/bin/sbatch"):
+            runner = SlurmRunner()
+            self.assertFalse(runner.mock_mode)
+            with mock.patch("qeanalyzer.runner.slurm.subprocess.run", return_value=empty):
+                status = runner.status("123456")
+
+        self.assertEqual(status.state, "UNKNOWN")
+        self.assertFalse(status.is_finished())
+
+
+class TestWaitTerminatesOnUnknownState(unittest.TestCase):
+    """wait() must not spin forever on a job the backend cannot identify."""
+
+    def test_wait_gives_up_after_repeated_unknown(self):
+        runner = LocalRunner()
+        start = time.time()
+        status = runner.wait(
+            "no-such-job", poll_interval_seconds=0.001, max_unknown_polls=3
+        )
+        self.assertEqual(status.state, "FAILED")
+        self.assertIn("UNKNOWN", status.error_message)
+        self.assertLess(time.time() - start, 5.0)
+
+    def test_transient_unknown_does_not_end_the_wait(self):
+        """The counter resets, so one blip mid-run is tolerated."""
+        states = ["UNKNOWN", "RUNNING", "UNKNOWN", "UNKNOWN", "COMPLETED"]
+        seen: list[str] = []
+
+        class _Flaky(LocalRunner):
+            def status(self, job_id, working_dir=None):
+                state = states[len(seen)]
+                seen.append(state)
+                return JobStatus(job_id=job_id, state=state)
+
+        status = _Flaky().wait(
+            "job", poll_interval_seconds=0.001, max_unknown_polls=3
+        )
+        self.assertEqual(status.state, "COMPLETED")
+        self.assertEqual(len(seen), 5)
+
+    def test_mock_slurm_job_can_be_waited_on(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            runner = SlurmRunner(mock_mode=True)
+            job = runner.submit(RunSpec(working_dir=tmpdir, job_name="waitable"))
+            status = runner.wait(job.job_id, poll_interval_seconds=0.001)
+            self.assertEqual(status.state, "COMPLETED")
 
 
 if __name__ == "__main__":

@@ -167,6 +167,66 @@ class TestPlotting(unittest.TestCase):
         with self.assertRaises(TypeError):
             plot_workflow_history(12345)  # type: ignore
 
+class TestRelaxationSeriesAlignment(unittest.TestCase):
+    """Each panel's points must stay anchored to the ionic step they came from.
+
+    Filtering the y values while slicing the x list positionally shifts points
+    onto the wrong step, and by a different amount per panel since the gaps in
+    energy, force and pressure need not coincide.
+    """
+
+    def test_pairs_are_filtered_together(self):
+        from qeanalyzer.plotting.convergence import _paired
+
+        class _Step:
+            def __init__(self, step, value):
+                self.step = step
+                self.value = value
+
+        steps = [_Step(1, None), _Step(2, -15.2), _Step(3, None), _Step(4, -15.4)]
+        xs, ys = _paired(steps, lambda s: s.value)
+        self.assertEqual(xs, [2, 4])
+        self.assertEqual(ys, [-15.2, -15.4])
+
+    def test_all_present_is_unchanged(self):
+        from qeanalyzer.plotting.convergence import _paired
+
+        class _Step:
+            def __init__(self, step, value):
+                self.step = step
+                self.value = value
+
+        steps = [_Step(1, 1.0), _Step(2, 2.0), _Step(3, 3.0)]
+        xs, ys = _paired(steps, lambda s: s.value)
+        self.assertEqual(xs, [1, 2, 3])
+        self.assertEqual(ys, [1.0, 2.0, 3.0])
+
+    @REQUIRES_MATPLOTLIB
+    def test_plotted_energy_lands_on_its_own_step(self):
+        """A relaxation missing an early energy must not shift the curve left."""
+        from qeanalyzer.models.run import IonicStep, QEConvergenceHistory
+
+        result = QERunResult(run_id="shifted", calculation="relax")
+        result.convergence = QEConvergenceHistory(
+            ionic_steps=[
+                IonicStep(step=1, converged=True, total_energy_ry=None, total_force=0.9),
+                IonicStep(step=2, converged=True, total_energy_ry=-15.2, total_force=0.5),
+                IonicStep(step=3, converged=True, total_energy_ry=-15.4, total_force=0.1),
+            ]
+        )
+        fig = plot_relaxation_convergence(result)
+        try:
+            xs, ys = fig.axes[0].lines[0].get_data()
+            self.assertEqual(list(xs), [2, 3])
+            self.assertEqual(list(ys), [-15.2, -15.4])
+
+            fx, fy = fig.axes[1].lines[0].get_data()
+            self.assertEqual(list(fx), [1, 2, 3])
+        finally:
+            import matplotlib.pyplot as plt
+
+            plt.close(fig)
+
 
 if __name__ == "__main__":
     unittest.main()

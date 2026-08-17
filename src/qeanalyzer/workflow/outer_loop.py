@@ -172,16 +172,22 @@ class OuterLoopLedger:
 
         curr = self.iterations[-1]
 
-        # Check maximum iteration limit
-        if n_iters >= self.criteria.max_outer_iterations:
-            return ConvergenceCheckResult(
-                is_converged=False,
-                iteration=n_iters,
-                reason=f"Reached maximum allowed outer iterations ({self.criteria.max_outer_iterations}).",
-            )
+        # The iteration limit is evaluated only after the convergence criteria
+        # below: a loop that satisfies every criterion on its final allowed
+        # iteration has converged, and must not be reported as having run out.
 
         # Single iteration cannot compute delta_E or delta_rdm
         if n_iters == 1:
+            if n_iters >= self.criteria.max_outer_iterations:
+                return ConvergenceCheckResult(
+                    is_converged=False,
+                    iteration=n_iters,
+                    max_gradient=curr.max_gradient,
+                    reason=(
+                        "Reached maximum allowed outer iterations "
+                        f"({self.criteria.max_outer_iterations})."
+                    ),
+                )
             return ConvergenceCheckResult(
                 is_converged=False,
                 iteration=1,
@@ -224,6 +230,11 @@ class OuterLoopLedger:
             reason = (
                 f"Outer-loop self-consistency achieved in {n_iters} iterations "
                 f"(|ΔE|={abs(delta_e):.2e} eV, ||Δγ||={delta_rdm:.2e})."
+            )
+        elif n_iters >= self.criteria.max_outer_iterations:
+            reason = (
+                "Reached maximum allowed outer iterations "
+                f"({self.criteria.max_outer_iterations})."
             )
         else:
             failed = [k for k, v in passed_map.items() if not v]

@@ -22,6 +22,9 @@ NAMELIST_ORDER: tuple[str, ...] = (
 )
 
 # Card names recognised by pw.x, in canonical order.
+# Cards beyond the four with a structured representation are preserved verbatim
+# on PWInput.extra_cards so that round-tripping an input does not silently drop
+# them. HUBBARD is the QE >= 7.1 replacement for the Hubbard_U(i) SYSTEM keys.
 CARD_ORDER: tuple[str, ...] = (
     "ATOMIC_SPECIES",
     "ATOMIC_POSITIONS",
@@ -30,6 +33,9 @@ CARD_ORDER: tuple[str, ...] = (
     "CONSTRAINTS",
     "OCCUPATIONS",
     "ATOMIC_FORCES",
+    "ADDITIONAL_K_POINTS",
+    "SOLVENTS",
+    "HUBBARD",
 )
 
 # Matches Fortran-style floats: 1.0, .5, 1.0d-8, 2.5D+3, 3e2, etc.
@@ -88,11 +94,28 @@ class CellParameters:
 
 
 @dataclass
+class RawCard:
+    """A card kept verbatim because it has no structured representation.
+
+    Cards such as CONSTRAINTS, OCCUPATIONS, ATOMIC_FORCES and HUBBARD are not
+    interpreted, but they are preserved so a parse/write round trip does not
+    change the physics of the calculation.
+    """
+
+    name: str
+    option: str | None = None
+    lines: list[str] = field(default_factory=list)
+
+
+@dataclass
 class PWInput:
     """Complete parsed representation of a pw.x input file.
 
     Namelists are stored as ``{NAME: {key: value, ...}}``.  All namelist
     keys are lower-cased; values are converted to native Python types.
+    Namelists and cards that pw.x accepts but this module does not model are
+    still retained (in *namelists* and *extra_cards* respectively) so that
+    writing an input back out preserves them.
     """
 
     namelists: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -101,6 +124,7 @@ class PWInput:
     atomic_positions: list[AtomicPosition] = field(default_factory=list)
     kpoints: KPoints | None = None
     cell_parameters: CellParameters | None = None
+    extra_cards: list[RawCard] = field(default_factory=list)
 
     # -- Convenience properties ----------------------------------------------
 
@@ -449,6 +473,14 @@ def parse_pw_input(text: str) -> PWInput:
                 result.cell_parameters = _parse_cell_parameters_lines(
                     option, card_lines,
                 )
+            else:
+                # No structured representation for this card; keep it verbatim so
+                # write_pw_input can emit it unchanged.
+                result.extra_cards.append(RawCard(
+                    name=matched_card,
+                    option=option or None,
+                    lines=list(card_lines),
+                ))
             continue
 
         i += 1
@@ -489,16 +521,23 @@ def write_pw_input(pw: PWInput) -> str:
     """
     sections: list[str] = []
 
-    # Namelists in canonical order.
-    for name in NAMELIST_ORDER:
-        if name not in pw.namelists:
-            continue
-        nl = pw.namelists[name]
+    def _namelist_block(name: str, nl: dict[str, Any]) -> str:
         block = [f"&{name}"]
         for key in sorted(nl):
             block.append(f"  {key} = {_format_value(nl[key])},")
         block.append("/")
-        sections.append("\n".join(block))
+        return "\n".join(block)
+
+    # Namelists in canonical order.
+    for name in NAMELIST_ORDER:
+        if name not in pw.namelists:
+            continue
+        sections.append(_namelist_block(name, pw.namelists[name]))
+
+    # Any further namelists pw.x accepts but this module does not model (&FCP,
+    # &RISM, ...). Sorted so the output stays deterministic across round trips.
+    for name in sorted(set(pw.namelists) - set(NAMELIST_ORDER)):
+        sections.append(_namelist_block(name, pw.namelists[name]))
 
     # ATOMIC_SPECIES
     if pw.atomic_species:
@@ -547,6 +586,11 @@ def write_pw_input(pw: PWInput) -> str:
         for v in cp.vectors:
             block.append(f"  {v[0]:.10f}  {v[1]:.10f}  {v[2]:.10f}")
         sections.append("\n".join(block))
+
+    # Cards retained verbatim (CONSTRAINTS, OCCUPATIONS, ATOMIC_FORCES, HUBBARD, ...).
+    for card in pw.extra_cards:
+        header = f"{card.name} {{{card.option}}}" if card.option else card.name
+        sections.append("\n".join([header, *(f"  {ln}" for ln in card.lines)]))
 
     return "\n\n".join(sections) + "\n"
 

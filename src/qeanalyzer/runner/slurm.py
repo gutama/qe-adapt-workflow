@@ -49,7 +49,10 @@ class SlurmRunner(BaseRunner):
         self.walltime = walltime
         self.modules = modules or []
         self.srun_cmd = srun_cmd
-        self.mock_mode = mock_mode or (shutil.which("sbatch") is None)
+        # Mock mode must be asked for explicitly. Inferring it from a missing
+        # sbatch would fabricate QUEUED job ids for calculations that were never
+        # submitted, and the caller would wait on jobs that do not exist.
+        self.mock_mode = mock_mode
         self._mock_jobs: dict[str, JobStatus] = {}
 
     def generate_batch_script(self, run_spec: RunSpec) -> str:
@@ -113,6 +116,20 @@ class SlurmRunner(BaseRunner):
             return status
 
         # Real sbatch invocation
+        if shutil.which("sbatch") is None:
+            return JobStatus(
+                job_id="failed_sbatch",
+                state="FAILED",
+                error_message=(
+                    "sbatch was not found on PATH, so nothing was submitted. The batch "
+                    f"script was staged at {script_path}. Pass mock_mode=True to stage "
+                    "scripts deliberately without submitting them."
+                ),
+                stdout_path=str(out_path),
+                stderr_path=str(err_path),
+                metadata={"script_path": str(script_path)},
+            )
+
         try:
             res = subprocess.run(
                 ["sbatch", str(script_path.name)],
@@ -142,10 +159,18 @@ class SlurmRunner(BaseRunner):
     def status(self, job_id: str, working_dir: str | Path | None = None) -> JobStatus:
         """Query job state via squeue or sacct."""
         if self.mock_mode:
-            return self._mock_jobs.get(
-                job_id,
-                JobStatus(job_id=job_id, state="UNKNOWN", error_message="Job not found in SLURM mock state."),
-            )
+            mock = self._mock_jobs.get(job_id)
+            if mock is None:
+                return JobStatus(
+                    job_id=job_id,
+                    state="UNKNOWN",
+                    error_message="Job not found in SLURM mock state.",
+                )
+            # A simulated job reaches a terminal state on its first poll. Leaving it
+            # QUEUED forever would make wait() spin indefinitely on a valid job id.
+            if mock.state == "QUEUED":
+                mock.state = "COMPLETED"
+            return mock
 
         try:
             res = subprocess.run(
@@ -183,7 +208,17 @@ class SlurmRunner(BaseRunner):
                 }
                 return JobStatus(job_id=job_id, state=state_map.get(main_state, "UNKNOWN"))
 
-            return JobStatus(job_id=job_id, state="COMPLETED")
+            # Neither squeue nor sacct knows this job. That is not evidence of
+            # success -- it also covers a job id that was never submitted and a
+            # cluster without accounting configured.
+            return JobStatus(
+                job_id=job_id,
+                state="UNKNOWN",
+                error_message=(
+                    "Job is not known to squeue or sacct; it may never have been "
+                    "submitted, or job accounting may be unavailable on this cluster."
+                ),
+            )
         except Exception as exc:
             return JobStatus(job_id=job_id, state="UNKNOWN", error_message=str(exc))
 

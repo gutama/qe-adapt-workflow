@@ -3,6 +3,7 @@
 from qeanalyzer.io.pw_input import (
     AtomicPosition,
     AtomicSpecies,
+    RawCard,
     CellParameters,
     KPoints,
     PWInput,
@@ -31,6 +32,7 @@ from qeanalyzer.io.qe_xml import (
 __all__ = [
     "AtomicPosition",
     "AtomicSpecies",
+    "RawCard",
     "CellParameters",
     "ForceAtom",
     "IonicStep",
