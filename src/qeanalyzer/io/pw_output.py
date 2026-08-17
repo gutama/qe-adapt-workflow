@@ -325,6 +325,10 @@ def parse_pw_output(text: str) -> PWOutput:
     # Track SCF iterations & ionic steps
     all_ionic_steps: list[IonicStep] = []
     current_step_scf: list[SCFIteration] = []
+    # Electronic convergence of the ionic step currently being accumulated. Reset
+    # at each new ionic block so a step that failed to converge is recorded as
+    # such instead of inheriting the previous step's result.
+    current_step_converged: bool = False
     current_iter_num: int | None = None
     current_iter_energy: float | None = None
     current_iter_acc: float | None = None
@@ -404,13 +408,14 @@ def parse_pw_output(text: str) -> PWOutput:
                 all_ionic_steps.append(IonicStep(
                     step=len(all_ionic_steps) + 1,
                     scf_iterations=list(current_step_scf),
-                    converged=True,
+                    converged=current_step_converged,
                     total_energy_ry=current_final_energy,
                     forces=current_forces,
                     total_force=current_total_force,
                     stress=current_stress,
                 ))
                 current_step_scf.clear()
+                current_step_converged = False
                 current_forces = None
                 current_total_force = None
                 current_stress = None
@@ -470,9 +475,11 @@ def parse_pw_output(text: str) -> PWOutput:
         # 6. Convergence
         elif m := _RE_CONVERGED.search(line):
             output.scf_converged = True
+            current_step_converged = True
             output.n_scf_iterations = int(m.group(1))
         elif _RE_NOT_CONVERGED.search(line):
             output.scf_converged = False
+            current_step_converged = False
 
         # 7. Final energy & contributions
         elif m := _RE_FINAL_ENERGY.search(line):

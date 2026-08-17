@@ -1,0 +1,31 @@
+
+     Program PWSCF v.7.2 starts on 15Aug2024 at 12:31:07
+
+     Parallel version (MPI), running on     4 processors
+
+     bravais-lattice index     =            2
+     number of atoms/cell      =            2
+     kinetic-energy cutoff     =      30.0000  Ry
+     charge density cutoff     =     240.0000  Ry
+     convergence threshold     =      1.0E-08
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     total energy              =     -15.10000000 Ry
+     estimated scf accuracy    <       1.20000000 Ry
+
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     total energy              =     -14.20000000 Ry
+     estimated scf accuracy    <       4.80000000 Ry
+
+     iteration #  3     ecut=    30.00 Ry     beta= 0.70
+     total energy              =     -11.90000000 Ry
+     estimated scf accuracy    <      19.30000000 Ry
+
+     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+     Error in routine electrons (1):
+     charge is wrong: smearing is needed
+     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+     stopping ...

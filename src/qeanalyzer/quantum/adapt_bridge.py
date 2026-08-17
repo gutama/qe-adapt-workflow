@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import itertools
 import math
 from abc import ABC, abstractmethod
@@ -10,6 +11,30 @@ from typing import Any
 
 from qeanalyzer.quantum.active_space import ActiveSpace
 from qeanalyzer.quantum.hamiltonian import MaterialHamiltonian
+
+
+def _string_excitation_phase(
+    occ: tuple[int, ...],
+    removals: tuple[int, ...],
+    additions: tuple[int, ...],
+) -> int:
+    """Fermionic parity of exciting ``removals`` -> ``additions`` within one spin string.
+
+    Orbitals are annihilated from, then created into, a list kept in ascending
+    order; each operator contributes ``(-1)**(number of occupied orbitals below
+    it)``.  For a single excitation this reduces to the index convention used by
+    the single-excitation blocks below.
+    """
+    current = list(occ)
+    parity = 0
+    for p in removals:
+        parity += current.index(p)
+        current.remove(p)
+    for q in additions:
+        pos = bisect.bisect_left(current, q)
+        parity += pos
+        current.insert(pos, q)
+    return -1 if parity % 2 else 1
 
 
 @dataclass
@@ -144,6 +169,13 @@ class ExactDiagonalizationSolver(QuantumSolver):
         alpha_configs = list(itertools.combinations(range(norb), n_alpha))
         beta_configs = list(itertools.combinations(range(norb), n_beta))
 
+        # Position of each configuration in its spin string, so CI-matrix
+        # construction can look one up in O(1). A linear .index() scan here sits
+        # inside the innermost loop and would dominate runtime as the FCI
+        # dimension grows.
+        alpha_config_index = {cfg: i for i, cfg in enumerate(alpha_configs)}
+        beta_config_index = {cfg: i for i, cfg in enumerate(beta_configs)}
+
         dim_alpha = len(alpha_configs)
         dim_beta = len(beta_configs)
         dim_total = dim_alpha * dim_beta
@@ -196,7 +228,7 @@ class ExactDiagonalizationSolver(QuantumSolver):
                     for q in range(norb):
                         if q not in alpha_tuple:
                             new_alpha = sorted((alpha_tuple - {p}) | {q})
-                            new_a_idx = alpha_configs.index(tuple(new_alpha))
+                            new_a_idx = alpha_config_index[tuple(new_alpha)]
                             idx2 = get_index(new_a_idx, b_idx)
                             if idx2 > idx1:
                                 # Sign for fermionic parity
@@ -221,7 +253,7 @@ class ExactDiagonalizationSolver(QuantumSolver):
                     for q in range(norb):
                         if q not in beta_tuple:
                             new_beta = sorted((beta_tuple - {p}) | {q})
-                            new_b_idx = beta_configs.index(tuple(new_beta))
+                            new_b_idx = beta_config_index[tuple(new_beta)]
                             idx2 = get_index(a_idx, new_b_idx)
                             if idx2 > idx1:
                                 p_pos = list(beta_set).index(p)
@@ -243,12 +275,12 @@ class ExactDiagonalizationSolver(QuantumSolver):
                     for q_a in range(norb):
                         if q_a not in alpha_tuple:
                             new_alpha = sorted((alpha_tuple - {p_a}) | {q_a})
-                            new_a_idx = alpha_configs.index(tuple(new_alpha))
+                            new_a_idx = alpha_config_index[tuple(new_alpha)]
                             for p_b in beta_tuple:
                                 for q_b in range(norb):
                                     if q_b not in beta_tuple:
                                         new_beta = sorted((beta_tuple - {p_b}) | {q_b})
-                                        new_b_idx = beta_configs.index(tuple(new_beta))
+                                        new_b_idx = beta_config_index[tuple(new_beta)]
                                         idx2 = get_index(new_a_idx, new_b_idx)
                                         if idx2 > idx1:
                                             pa_pos = list(alpha_set).index(p_a)
@@ -261,6 +293,40 @@ class ExactDiagonalizationSolver(QuantumSolver):
                                             val = phase * hamiltonian.h2[p_a][q_a][p_b][q_b]
                                             h_matrix[idx1][idx2] += val
                                             h_matrix[idx2][idx1] += val
+
+                # Alpha-alpha double excitations: (p < q) -> (r < s), both in the alpha string.
+                # Antisymmetrized: <pq||rs> = (pr|qs) - (ps|qr).
+                alpha_virt = [x for x in range(norb) if x not in alpha_tuple]
+                for p, q in itertools.combinations(alpha_set, 2):
+                    for r, s in itertools.combinations(alpha_virt, 2):
+                        new_alpha = sorted((alpha_tuple - {p, q}) | {r, s})
+                        new_a_idx = alpha_config_index[tuple(new_alpha)]
+                        idx2 = get_index(new_a_idx, b_idx)
+                        if idx2 > idx1:
+                            # The phase helper applies a_s^+ a_r^+ a_q a_p, while the
+                            # normal-ordered Hamiltonian term is a_r^+ a_s^+ a_q a_p;
+                            # the extra transposition supplies the leading minus.
+                            phase = _string_excitation_phase(alpha_set, (p, q), (r, s))
+                            val = -phase * (
+                                hamiltonian.h2[p][r][q][s] - hamiltonian.h2[p][s][q][r]
+                            )
+                            h_matrix[idx1][idx2] += val
+                            h_matrix[idx2][idx1] += val
+
+                # Beta-beta double excitations: (p < q) -> (r < s), both in the beta string.
+                beta_virt = [x for x in range(norb) if x not in beta_tuple]
+                for p, q in itertools.combinations(beta_set, 2):
+                    for r, s in itertools.combinations(beta_virt, 2):
+                        new_beta = sorted((beta_tuple - {p, q}) | {r, s})
+                        new_b_idx = beta_config_index[tuple(new_beta)]
+                        idx2 = get_index(a_idx, new_b_idx)
+                        if idx2 > idx1:
+                            phase = _string_excitation_phase(beta_set, (p, q), (r, s))
+                            val = -phase * (
+                                hamiltonian.h2[p][r][q][s] - hamiltonian.h2[p][s][q][r]
+                            )
+                            h_matrix[idx1][idx2] += val
+                            h_matrix[idx2][idx1] += val
 
         # Diagonalize CI matrix
         import numpy as np
@@ -295,7 +361,7 @@ class ExactDiagonalizationSolver(QuantumSolver):
                 for a_idx, alpha_set in enumerate(alpha_configs):
                     if q in alpha_set and p not in alpha_set:
                         new_alpha = sorted((set(alpha_set) - {q}) | {p})
-                        new_a_idx = alpha_configs.index(tuple(new_alpha))
+                        new_a_idx = alpha_config_index[tuple(new_alpha)]
                         q_pos = list(alpha_set).index(q)
                         p_pos = new_alpha.index(p)
                         phase = (-1) ** (p_pos + q_pos)
@@ -309,7 +375,7 @@ class ExactDiagonalizationSolver(QuantumSolver):
                 for b_idx, beta_set in enumerate(beta_configs):
                     if q in beta_set and p not in beta_set:
                         new_beta = sorted((set(beta_set) - {q}) | {p})
-                        new_b_idx = beta_configs.index(tuple(new_beta))
+                        new_b_idx = beta_config_index[tuple(new_beta)]
                         q_pos = list(beta_set).index(q)
                         p_pos = new_beta.index(p)
                         phase = (-1) ** (p_pos + q_pos)

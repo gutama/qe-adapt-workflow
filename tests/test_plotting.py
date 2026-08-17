@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,7 +18,28 @@ from qeanalyzer.workflow import WorkflowLedger, WorkflowRunEntry
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+# matplotlib ships in the optional 'plot' extra, so these tests must skip rather
+# than fail on an installation that did not ask for it.
+HAS_MATPLOTLIB = importlib.util.find_spec("matplotlib") is not None
+REQUIRES_MATPLOTLIB = unittest.skipUnless(
+    HAS_MATPLOTLIB, "matplotlib is not installed (optional 'plot' extra)"
+)
 
+
+class TestPlottingWithoutMatplotlib(unittest.TestCase):
+    """The plotting layer must fail with a usable message, not a raw ImportError."""
+
+    @unittest.skipIf(HAS_MATPLOTLIB, "matplotlib is installed")
+    def test_missing_matplotlib_raises_actionable_error(self):
+        pw_out = read_pw_output(FIXTURES / "si_scf.out")
+        result = build_run_result(pw_out=pw_out, run_id="si-scf")
+        with self.assertRaises(ImportError) as ctx:
+            plot_scf_convergence(result)
+        self.assertIn("matplotlib", str(ctx.exception))
+        self.assertIn("[plot]", str(ctx.exception))
+
+
+@REQUIRES_MATPLOTLIB
 class TestPlotting(unittest.TestCase):
     """Test figure generation for SCF, relaxation, and workflow history."""
 
@@ -144,6 +166,66 @@ class TestPlotting(unittest.TestCase):
     def test_plot_workflow_history_invalid_type_raises(self):
         with self.assertRaises(TypeError):
             plot_workflow_history(12345)  # type: ignore
+
+class TestRelaxationSeriesAlignment(unittest.TestCase):
+    """Each panel's points must stay anchored to the ionic step they came from.
+
+    Filtering the y values while slicing the x list positionally shifts points
+    onto the wrong step, and by a different amount per panel since the gaps in
+    energy, force and pressure need not coincide.
+    """
+
+    def test_pairs_are_filtered_together(self):
+        from qeanalyzer.plotting.convergence import _paired
+
+        class _Step:
+            def __init__(self, step, value):
+                self.step = step
+                self.value = value
+
+        steps = [_Step(1, None), _Step(2, -15.2), _Step(3, None), _Step(4, -15.4)]
+        xs, ys = _paired(steps, lambda s: s.value)
+        self.assertEqual(xs, [2, 4])
+        self.assertEqual(ys, [-15.2, -15.4])
+
+    def test_all_present_is_unchanged(self):
+        from qeanalyzer.plotting.convergence import _paired
+
+        class _Step:
+            def __init__(self, step, value):
+                self.step = step
+                self.value = value
+
+        steps = [_Step(1, 1.0), _Step(2, 2.0), _Step(3, 3.0)]
+        xs, ys = _paired(steps, lambda s: s.value)
+        self.assertEqual(xs, [1, 2, 3])
+        self.assertEqual(ys, [1.0, 2.0, 3.0])
+
+    @REQUIRES_MATPLOTLIB
+    def test_plotted_energy_lands_on_its_own_step(self):
+        """A relaxation missing an early energy must not shift the curve left."""
+        from qeanalyzer.models.run import IonicStep, QEConvergenceHistory
+
+        result = QERunResult(run_id="shifted", calculation="relax")
+        result.convergence = QEConvergenceHistory(
+            ionic_steps=[
+                IonicStep(step=1, converged=True, total_energy_ry=None, total_force=0.9),
+                IonicStep(step=2, converged=True, total_energy_ry=-15.2, total_force=0.5),
+                IonicStep(step=3, converged=True, total_energy_ry=-15.4, total_force=0.1),
+            ]
+        )
+        fig = plot_relaxation_convergence(result)
+        try:
+            xs, ys = fig.axes[0].lines[0].get_data()
+            self.assertEqual(list(xs), [2, 3])
+            self.assertEqual(list(ys), [-15.2, -15.4])
+
+            fx, fy = fig.axes[1].lines[0].get_data()
+            self.assertEqual(list(fx), [1, 2, 3])
+        finally:
+            import matplotlib.pyplot as plt
+
+            plt.close(fig)
 
 
 if __name__ == "__main__":

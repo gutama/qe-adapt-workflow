@@ -200,6 +200,133 @@ class TestXMLParserEdgeCases(unittest.TestCase):
         with self.assertRaises(ET.ParseError):
             parse_qe_xml("not valid xml <<<")
 
+_XML_HEAD = (
+    "<qes:espresso xmlns:qes='http://www.quantum-espresso.org/ns/qes/qes-1.0' "
+    "SCHEMA_VERSION='1.0.0'>"
+)
+
+
+def _xml_with_convergence(scf_flag: str | None, opt_flag: str | None = None) -> str:
+    """Build a minimal XML whose convergence_achieved flags are set explicitly."""
+    scf_body = "<n_scf_steps>12</n_scf_steps><scf_error>1.0e-03</scf_error>"
+    if scf_flag is not None:
+        scf_body = f"<convergence_achieved>{scf_flag}</convergence_achieved>" + scf_body
+    blocks = f"<scf_conv>{scf_body}</scf_conv>"
+    if opt_flag is not None:
+        blocks += (
+            f"<opt_conv><convergence_achieved>{opt_flag}</convergence_achieved>"
+            "<n_opt_steps>7</n_opt_steps></opt_conv>"
+        )
+    return f"{_XML_HEAD}<output><convergence_info>{blocks}</convergence_info></output></qes:espresso>"
+
+
+class TestXMLConvergenceFlags(unittest.TestCase):
+    """The presence of <scf_conv> means an SCF was attempted, not that it converged."""
+
+    def test_failed_scf_is_not_reported_converged(self):
+        out = parse_qe_xml(_xml_with_convergence("false"))
+        self.assertIs(out.scf_converged, False)
+
+    def test_converged_scf_is_reported_converged(self):
+        out = parse_qe_xml(_xml_with_convergence("true"))
+        self.assertIs(out.scf_converged, True)
+
+    def test_failed_geometry_optimization_is_not_reported_converged(self):
+        out = parse_qe_xml(_xml_with_convergence("true", opt_flag="false"))
+        self.assertIs(out.opt_converged, False)
+
+    def test_missing_flag_falls_back_to_element_presence(self):
+        """Files that omit convergence_achieved keep the older, weaker signal."""
+        out = parse_qe_xml(_xml_with_convergence(None))
+        self.assertIs(out.scf_converged, True)
+
+    def test_absent_convergence_info_is_unknown_not_false(self):
+        """None distinguishes 'no record' from 'recorded as failed'."""
+        out = parse_qe_xml(f"{_XML_HEAD}<output/></qes:espresso>")
+        self.assertIsNone(out.scf_converged)
+
+
+class TestXMLStressUnitsAndSign(unittest.TestCase):
+    """Stress conversion must match QE's own kbar convention.
+
+    QE prints P = +Tr(sigma)/3, and converts Ry/Bohr^3 to kbar with
+    uakbar = 147105.0 -- hence 294210.26 kbar per Hartree/Bohr^3. Both are
+    confirmed by the si_vc_relax.out fixture, whose first stress block prints
+    diagonal (15.00, 15.15, 15.45) kbar alongside P= 15.20.
+    """
+
+    STRESS_XML = (
+        f"{_XML_HEAD}<output><stress units='Hartree/Bohr**3'>\n"
+        "-1.000000e-04 0.000000e+00 0.000000e+00\n"
+        "0.000000e+00 -1.000000e-04 0.000000e+00\n"
+        "0.000000e+00 0.000000e+00 -1.000000e-04\n"
+        "</stress></output></qes:espresso>"
+    )
+
+    def setUp(self):
+        self.out = parse_qe_xml(self.STRESS_XML)
+
+    def test_stress_magnitude_in_kbar(self):
+        # 1e-4 Ha/Bohr^3 * 294210.2648 kbar = 29.42102648 kbar
+        self.assertAlmostEqual(self.out.stress_kbar[0][0], -29.42102648, places=6)
+
+    def test_pressure_sign_follows_qe_convention(self):
+        """An all-compressive (negative) diagonal gives a negative pressure."""
+        self.assertAlmostEqual(self.out.pressure_kbar, -29.42102648, places=6)
+
+    def test_pressure_is_positive_trace_over_three(self):
+        self.assertAlmostEqual(
+            self.out.pressure_kbar,
+            sum(self.out.stress_kbar[i][i] for i in range(3)) / 3.0,
+            places=9,
+        )
+
+class TestMalformedNumericBlocksDegradeGracefully(unittest.TestCase):
+    """One bad token must not cost the caller the rest of the file.
+
+    QE prints '*****' when a value overflows its Fortran field width. The
+    k-point and eigenvalue paths already tolerate that; forces and stress must
+    too, rather than aborting the parse and discarding energies and bands.
+    """
+
+    OVERFLOW_XML = (
+        f"{_XML_HEAD}<output>"
+        "<convergence_info><scf_conv>"
+        "<convergence_achieved>true</convergence_achieved>"
+        "<n_scf_steps>8</n_scf_steps></scf_conv></convergence_info>"
+        "<total_energy><etot>-7.92717283</etot></total_energy>"
+        "<stress units='Hartree/Bohr**3'>\n"
+        "***** 0.000000e+00 0.000000e+00\n"
+        "0.000000e+00 -1.000000e-04 0.000000e+00\n"
+        "0.000000e+00 0.000000e+00 -1.000000e-04\n"
+        "</stress>"
+        "</output></qes:espresso>"
+    )
+
+    BAD_FORCES_XML = (
+        f"{_XML_HEAD}<output>"
+        "<total_energy><etot>-7.92717283</etot></total_energy>"
+        "<forces>\n0.0 0.0 nonsense\n0.0 0.0 -1.0e-3\n</forces>"
+        "</output></qes:espresso>"
+    )
+
+    def test_overflow_marker_does_not_abort_the_parse(self):
+        out = parse_qe_xml(self.OVERFLOW_XML)
+        self.assertAlmostEqual(out.total_energy_hartree, -7.92717283)
+        self.assertIs(out.scf_converged, True)
+        self.assertEqual(out.n_scf_steps, 8)
+
+    def test_unparsable_stress_row_is_skipped_not_fatal(self):
+        out = parse_qe_xml(self.OVERFLOW_XML)
+        # Only two of three rows survive, so no full tensor is reported.
+        self.assertIsNone(out.stress_kbar)
+
+    def test_unparsable_force_row_is_skipped(self):
+        out = parse_qe_xml(self.BAD_FORCES_XML)
+        self.assertAlmostEqual(out.total_energy_hartree, -7.92717283)
+        self.assertEqual(len(out.forces_hartree_bohr), 1)
+        self.assertAlmostEqual(out.forces_hartree_bohr[0][2], -1.0e-3)
+
 
 if __name__ == "__main__":
     unittest.main()

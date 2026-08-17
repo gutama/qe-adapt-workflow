@@ -656,6 +656,135 @@ class TestModification(unittest.TestCase):
         self.assertEqual(reparsed.atomic_species[0].symbol, "Ge")
         self.assertEqual(reparsed.atomic_positions[0].symbol, "Ge")
 
+class TestDoubleQuotedValues(unittest.TestCase):
+    """Fortran accepts " as well as ' as a string delimiter, and QE emits both.
+
+    A '/' inside a double-quoted value previously terminated the namelist early,
+    silently dropping every key after it.
+    """
+
+    TEXT = (
+        "&CONTROL\n"
+        '  calculation = "scf"\n'
+        '  outdir = "./tmp"\n'
+        '  pseudo_dir = "/opt/qe/pseudo"\n'
+        '  prefix = "si"\n'
+        "/\n"
+        "&SYSTEM\n"
+        "  ibrav = 2\n"
+        "  nat = 2\n"
+        "  ntyp = 1\n"
+        "  ecutwfc = 30.0\n"
+        "/\n"
+        "&ELECTRONS\n"
+        "  conv_thr = 1.0d-8\n"
+        "/\n"
+    )
+
+    def setUp(self):
+        self.inp = parse_pw_input(self.TEXT)
+
+    def test_value_containing_slash_is_not_truncated(self):
+        self.assertEqual(self.inp.get_param("CONTROL", "outdir"), "./tmp")
+        self.assertEqual(self.inp.get_param("CONTROL", "pseudo_dir"), "/opt/qe/pseudo")
+
+    def test_keys_after_a_slash_bearing_value_survive(self):
+        self.assertEqual(self.inp.get_param("CONTROL", "prefix"), "si")
+        self.assertEqual(self.inp.get_param("CONTROL", "calculation"), "scf")
+
+    def test_later_namelists_still_parse(self):
+        self.assertEqual(self.inp.get_param("SYSTEM", "ecutwfc"), 30.0)
+        self.assertEqual(self.inp.get_param("ELECTRONS", "conv_thr"), 1.0e-8)
+
+    def test_roundtrip_preserves_paths(self):
+        reparsed = parse_pw_input(write_pw_input(self.inp))
+        self.assertEqual(reparsed.get_param("CONTROL", "outdir"), "./tmp")
+        self.assertEqual(reparsed.get_param("CONTROL", "prefix"), "si")
+
+    def test_comment_stripping_respects_double_quotes(self):
+        inp = parse_pw_input('&CONTROL\n  outdir = "./a!b"  ! trailing comment\n/\n')
+        self.assertEqual(inp.get_param("CONTROL", "outdir"), "./a!b")
+
+    def test_single_quoted_values_still_work(self):
+        inp = parse_pw_input("&CONTROL\n  outdir = './tmp'\n  prefix = 'si'\n/\n")
+        self.assertEqual(inp.get_param("CONTROL", "outdir"), "./tmp")
+        self.assertEqual(inp.get_param("CONTROL", "prefix"), "si")
+
+    def test_apostrophe_inside_double_quoted_value(self):
+        inp = parse_pw_input("&CONTROL\n  title = \"it's fine\"\n  prefix = 'si'\n/\n")
+        self.assertEqual(inp.get_param("CONTROL", "title"), "it's fine")
+        self.assertEqual(inp.get_param("CONTROL", "prefix"), "si")
+
+class TestUnmodelledNamelistsAndCardsSurviveRoundTrip(unittest.TestCase):
+    """Every policy deepcopies a PWInput and re-emits it via write_pw_input.
+
+    Anything the writer drops is silently removed from the next calculation, so
+    cards and namelists without a structured representation must round-trip.
+    """
+
+    TEXT = (
+        "&CONTROL\n  calculation = 'relax'\n  prefix = 'si'\n/\n"
+        "&SYSTEM\n  ibrav = 0\n  nat = 2\n  ntyp = 1\n  ecutwfc = 30.0\n/\n"
+        "&ELECTRONS\n  conv_thr = 1.0d-8\n/\n"
+        "&IONS\n  ion_dynamics = 'bfgs'\n/\n"
+        "&FCP\n  fcp_mu = 0.5\n/\n"
+        "ATOMIC_SPECIES\n Si 28.086 Si.upf\n"
+        "ATOMIC_POSITIONS crystal\n Si 0.0 0.0 0.0\n Si 0.25 0.25 0.25\n"
+        "K_POINTS automatic\n 4 4 4 0 0 0\n"
+        "CONSTRAINTS\n 1\n 'distance' 1 2 2.35\n"
+        "ATOMIC_FORCES\n Si 0.0 0.0 0.01\n Si 0.0 0.0 -0.01\n"
+        "HUBBARD (ortho-atomic)\n U Si-3d 4.5\n"
+    )
+
+    def setUp(self):
+        self.inp = parse_pw_input(self.TEXT)
+        self.written = write_pw_input(self.inp)
+        self.reparsed = parse_pw_input(self.written)
+
+    def test_unmodelled_namelist_is_parsed(self):
+        self.assertEqual(self.inp.get_param("FCP", "fcp_mu"), 0.5)
+
+    def test_unmodelled_namelist_is_written(self):
+        self.assertIn("&FCP", self.written)
+        self.assertEqual(self.reparsed.get_param("FCP", "fcp_mu"), 0.5)
+
+    def test_constraints_card_survives(self):
+        self.assertIn("CONSTRAINTS", self.written)
+        names = [c.name for c in self.reparsed.extra_cards]
+        self.assertIn("CONSTRAINTS", names)
+        card = next(c for c in self.reparsed.extra_cards if c.name == "CONSTRAINTS")
+        self.assertIn("'distance' 1 2 2.35", card.lines)
+
+    def test_atomic_forces_card_survives(self):
+        self.assertIn("ATOMIC_FORCES", self.written)
+        card = next(c for c in self.reparsed.extra_cards if c.name == "ATOMIC_FORCES")
+        self.assertEqual(len(card.lines), 2)
+
+    def test_hubbard_card_survives_with_option(self):
+        """The QE >= 7.1 HUBBARD card must not be dropped or lose its projector."""
+        card = next(c for c in self.reparsed.extra_cards if c.name == "HUBBARD")
+        self.assertEqual(card.option, "ortho-atomic")
+        self.assertIn("U Si-3d 4.5", card.lines)
+
+    def test_structured_content_still_round_trips(self):
+        self.assertEqual(self.reparsed.get_param("CONTROL", "calculation"), "relax")
+        self.assertEqual(len(self.reparsed.atomic_positions), 2)
+        self.assertEqual(self.reparsed.kpoints.grid, (4, 4, 4))
+
+    def test_second_round_trip_is_stable(self):
+        self.assertEqual(write_pw_input(self.reparsed), self.written)
+
+    def test_policy_style_deepcopy_preserves_cards(self):
+        """This is the path every workflow policy takes."""
+        from copy import deepcopy
+
+        clone = deepcopy(self.inp)
+        clone.set_param("ELECTRONS", "conv_thr", 1.0e-9)
+        out = parse_pw_input(write_pw_input(clone))
+        self.assertEqual(out.get_param("ELECTRONS", "conv_thr"), 1.0e-9)
+        self.assertIn("CONSTRAINTS", [c.name for c in out.extra_cards])
+        self.assertIn("HUBBARD", [c.name for c in out.extra_cards])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,69 @@
+
+     Program PWSCF v.7.2 starts on 15Aug2024 at 14:12:03
+
+     Parallel version (MPI), running on     4 processors
+
+     bravais-lattice index     =            2
+     number of atoms/cell      =            2
+     kinetic-energy cutoff     =      30.0000  Ry
+     charge density cutoff     =     240.0000  Ry
+     convergence threshold     =      1.0E-08
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     total energy              =     -15.70000000 Ry
+     estimated scf accuracy    <       0.50000000 Ry
+
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     total energy              =     -15.78000000 Ry
+     estimated scf accuracy    <       0.09000000 Ry
+
+     convergence NOT achieved after 100 iterations: stopping
+
+!    total energy              =     -15.78000000 Ry
+
+     Forces acting on atoms (cartesian axes, Ry/au):
+
+     atom    1 type  1   force =     0.00000000    0.00000000    0.06000000
+     atom    2 type  1   force =     0.00000000    0.00000000   -0.06000000
+
+     Total force =     0.084853     Total SCF correction =     0.004000
+
+     number of bfgs steps      =    1
+
+     ATOMIC_POSITIONS (crystal)
+     Si       0.0000000000        0.0000000000        0.0000000000
+     Si       0.2520000000        0.2520000000        0.2520000000
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.30
+     total energy              =     -15.85000000 Ry
+     estimated scf accuracy    <       0.00000005 Ry
+
+     convergence has been achieved in   1 iterations
+
+!    total energy              =     -15.85400000 Ry
+
+     Forces acting on atoms (cartesian axes, Ry/au):
+
+     atom    1 type  1   force =     0.00000000    0.00000000    0.00050000
+     atom    2 type  1   force =     0.00000000    0.00000000   -0.00050000
+
+     Total force =     0.000707     Total SCF correction =     0.000001
+
+     bfgs converged in   2 scf cycles and   1 bfgs steps
+     (criteria: energy <  1.0E-04 Ry, force <  1.0E-03 Ry/Bohr)
+
+     End of BFGS Geometry Optimization
+
+     Final energy   =     -15.85400000 Ry
+
+     PWSCF        :      3.05s CPU      3.40s WALL
+
+   This run was terminated on:  14:16:22  15Aug2024
+
+=------------------------------------------------------------------------------=
+   JOB DONE.
+=------------------------------------------------------------------------------=

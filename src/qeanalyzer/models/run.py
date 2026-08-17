@@ -263,14 +263,18 @@ def build_run_result(
     if pw_out:
         completed = pw_out.job_done
         scf_conv = pw_out.scf_converged
-        opt_conv = pw_out.bfgs_converged if pw_out.bfgs_converged else None
+        # Geometry convergence is only meaningful for ionic/cell relaxations.  For
+        # those, a False must survive: it means BFGS never reached its thresholds.
+        opt_conv = pw_out.bfgs_converged if calc in ("relax", "vc-relax") else None
         exit_st = pw_out.exit_status or "unknown"
         warnings_list.extend(pw_out.warnings)
         errors_list.extend(pw_out.errors)
 
     if qe_xml:
-        if qe_xml.scf_converged:
-            scf_conv = True
+        # None means the XML carried no convergence record; only an explicit
+        # value may override what the text output already established.
+        if qe_xml.scf_converged is not None:
+            scf_conv = qe_xml.scf_converged
         if qe_xml.opt_converged is not None:
             opt_conv = qe_xml.opt_converged
         if not pw_out:

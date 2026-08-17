@@ -22,13 +22,14 @@ class RelaxToSCFPolicy(Policy):
     description: str = "Extract relaxed geometry and transition to high-precision static SCF"
 
     def can_handle(self, result: QERunResult, prev_input: PWInput | None = None) -> bool:
-        """Check if calculation is a converged relax or vc-relax calculation."""
+        """Check if calculation is a converged relax or vc-relax calculation.
+
+        Only geometry convergence qualifies.  Electronic (SCF) convergence of the
+        final ionic step says nothing about whether BFGS reached its force and
+        energy thresholds, so it must not stand in for ``opt_converged``.
+        """
         is_relax_calc = result.calculation in ("relax", "vc-relax")
-        is_conv = (
-            result.status.opt_converged is True
-            or (result.status.scf_converged and is_relax_calc)
-        )
-        return is_relax_calc and is_conv
+        return is_relax_calc and result.status.opt_converged is True
 
     def evaluate(self, result: QERunResult, prev_input: PWInput | None = None) -> NextRunDecision:
         """Construct the static SCF input with relaxed geometry."""

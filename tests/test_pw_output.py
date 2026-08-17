@@ -305,6 +305,36 @@ class TestSyntheticOutputs(unittest.TestCase):
         self.assertEqual(len(out.scf_iterations), 1)
         self.assertEqual(out.scf_iterations[0].diag_method, "CG")
 
+class TestPerIonicStepConvergence(unittest.TestCase):
+    """Each archived ionic step records its own electronic convergence.
+
+    Hardcoding converged=True gave every intermediate step a clean bill of
+    health, so a relaxation that limped through unconverged electronic steps
+    looked identical to a healthy one.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = read_pw_output(FIXTURES / "relax_mixed_convergence.out")
+
+    def test_both_ionic_steps_are_recorded(self):
+        self.assertEqual(len(self.out.ionic_steps), 2)
+
+    def test_failed_electronic_step_is_marked_unconverged(self):
+        self.assertIs(self.out.ionic_steps[0].converged, False)
+
+    def test_successful_electronic_step_is_marked_converged(self):
+        self.assertIs(self.out.ionic_steps[1].converged, True)
+
+    def test_steps_are_distinguishable(self):
+        """The whole point: a caller can tell which geometry step struggled."""
+        flags = [s.converged for s in self.out.ionic_steps]
+        self.assertNotEqual(len(set(flags)), 1)
+
+    def test_healthy_relaxation_has_all_steps_converged(self):
+        healthy = read_pw_output(FIXTURES / "relax_unconverged.out")
+        self.assertTrue(all(s.converged for s in healthy.ionic_steps))
+
 
 if __name__ == "__main__":
     unittest.main()

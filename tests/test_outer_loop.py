@@ -74,23 +74,43 @@ class TestOuterLoopConvergence(unittest.TestCase):
         self.assertTrue(check2.passed_criteria["gradient"])
         self.assertIn("CONVERGED", check2.summary())
 
-    def test_outer_loop_max_iterations(self):
-        ledger = OuterLoopLedger(criteria=ConvergenceCriteria(max_outer_iterations=2))
-        q_res = QuantumRunResult(
-            energy_ev=-10.0,
-            electronic_energy_ev=-20.0,
+    @staticmethod
+    def _quantum_result(energy_ev: float, diag: float = 1.0) -> QuantumRunResult:
+        return QuantumRunResult(
+            energy_ev=energy_ev,
+            electronic_energy_ev=energy_ev - 10.0,
             solver_type="adapt_vqe",
             n_orbitals=2,
             n_electrons=2.0,
             n_spin_orbitals=4,
-            one_rdm=[[1.0, 0.0], [0.0, 1.0]],
+            one_rdm=[[diag, 0.0], [0.0, diag]],
         )
-        ledger.record_iteration(self.dft_res, q_res)
-        ledger.record_iteration(self.dft_res, q_res)
+
+    def test_outer_loop_max_iterations(self):
+        """Hitting the limit without meeting the criteria is reported as such."""
+        ledger = OuterLoopLedger(criteria=ConvergenceCriteria(max_outer_iterations=2))
+        ledger.record_iteration(self.dft_res, self._quantum_result(-10.0, diag=1.0))
+        ledger.record_iteration(self.dft_res, self._quantum_result(-14.0, diag=0.4))
 
         check = ledger.check_convergence()
         self.assertFalse(check.is_converged)
         self.assertIn("Reached maximum", check.reason)
+
+    def test_convergence_on_final_allowed_iteration_is_converged(self):
+        """Meeting every criterion on the last allowed iteration is a success.
+
+        The iteration limit must be evaluated after the criteria, otherwise a
+        genuinely self-consistent run is recorded as having merely run out.
+        """
+        ledger = OuterLoopLedger(criteria=ConvergenceCriteria(max_outer_iterations=2))
+        q_res = self._quantum_result(-10.0)
+        ledger.record_iteration(self.dft_res, q_res)
+        ledger.record_iteration(self.dft_res, q_res)
+
+        check = ledger.check_convergence()
+        self.assertTrue(check.is_converged)
+        self.assertNotIn("Reached maximum", check.reason)
+        self.assertTrue(all(check.passed_criteria.values()))
 
     def test_outer_loop_controller_orchestration(self):
         controller = OuterLoopController(

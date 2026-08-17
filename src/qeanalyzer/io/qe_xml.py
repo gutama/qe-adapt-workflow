@@ -19,8 +19,9 @@ HARTREE_TO_RY: float = 2.0
 HARTREE_TO_EV: float = 27.211386245988
 BOHR_TO_ANGSTROM: float = 0.529177210903
 # 1 Hartree / Bohr^3 to kbar: 1 Ha = 4.3597447222071e-18 J, 1 Bohr = 5.29177210903e-11 m
-# 1 Ha/Bohr^3 = 2.942102648438959e13 Pa = 294210.2648438959 bar = 29421.02648438959 kbar
-HARTREE_BOHR3_TO_KBAR: float = 29421.02648438959
+# 1 Ha/Bohr^3 = 2.942102648438959e13 Pa = 2.942102648438959e8 bar = 294210.2648438959 kbar
+# Cross-check: QE's uakbar = 147105.0 kbar per Ry/Bohr^3, and 1 Ha = 2 Ry.
+HARTREE_BOHR3_TO_KBAR: float = 294210.2648438959
 
 
 # -- Data classes ------------------------------------------------------------
@@ -70,7 +71,7 @@ class QEXMLOutput:
     mixing_beta: float | None = None
 
     # Convergence
-    scf_converged: bool = False
+    scf_converged: bool | None = None
     n_scf_steps: int | None = None
     scf_error: float | None = None
     opt_converged: bool | None = None
@@ -355,13 +356,18 @@ def parse_qe_xml(xml_content: str) -> QEXMLOutput:
         if conv_elem is not None:
             scf_conv = _find(conv_elem, "scf_conv")
             if scf_conv is not None:
-                result.scf_converged = True
+                # QE records the actual outcome in <convergence_achieved>; the mere
+                # presence of <scf_conv> says only that an SCF cycle was attempted.
+                # Fall back to True only for files that omit the flag entirely.
+                achieved = _find(scf_conv, "convergence_achieved")
+                result.scf_converged = _bool(achieved) if achieved is not None else True
                 result.n_scf_steps = _int(_find(scf_conv, "n_scf_steps"))
                 result.scf_error = _float(_find(scf_conv, "scf_error"))
 
             opt_conv = _find(conv_elem, "opt_conv")
             if opt_conv is not None:
-                result.opt_converged = True
+                achieved = _find(opt_conv, "convergence_achieved")
+                result.opt_converged = _bool(achieved) if achieved is not None else True
                 result.n_opt_steps = _int(_find(opt_conv, "n_opt_steps"))
 
         # Total energy
@@ -434,7 +440,13 @@ def parse_qe_xml(xml_content: str) -> QEXMLOutput:
             f_text = _text(forces_elem) or ""
             forces_list: list[tuple[float, float, float]] = []
             for line in f_text.split("\n"):
-                parts = [float(x) for x in line.split()]
+                # One unparsable token (e.g. the '*****' overflow marker QE emits
+                # when a value exceeds its field width) must not abort the whole
+                # parse and lose the energies and bands that read fine.
+                try:
+                    parts = [float(x) for x in line.split()]
+                except ValueError:
+                    continue
                 if len(parts) >= 3:
                     forces_list.append((parts[0], parts[1], parts[2]))
             if forces_list:
@@ -446,7 +458,10 @@ def parse_qe_xml(xml_content: str) -> QEXMLOutput:
             s_text = _text(stress_elem) or ""
             stress_rows_ha: list[list[float]] = []
             for line in s_text.split("\n"):
-                parts = [float(x) for x in line.split()]
+                try:
+                    parts = [float(x) for x in line.split()]
+                except ValueError:
+                    continue
                 if len(parts) >= 3:
                     stress_rows_ha.append([parts[0], parts[1], parts[2]])
             if len(stress_rows_ha) >= 3:
@@ -469,8 +484,9 @@ def parse_qe_xml(xml_content: str) -> QEXMLOutput:
                     ),
                 )
                 result.stress_kbar = s_kbar
-                # Pressure P = -1/3 Tr(sigma)
-                result.pressure_kbar = -(s_kbar[0][0] + s_kbar[1][1] + s_kbar[2][2]) / 3.0
+                # QE's stress.f90 reports P = +1/3 Tr(sigma); matching that sign keeps
+                # the XML pressure consistent with the value parsed from pw.out.
+                result.pressure_kbar = (s_kbar[0][0] + s_kbar[1][1] + s_kbar[2][2]) / 3.0
 
         # Final structure (for relax/vc-relax)
         final_struct_elem = _find(output_elem, "atomic_structure")
