@@ -322,6 +322,7 @@ def build_band_model_hamiltonian(
     )
     ham.metadata.update({
         "model_kind": "qe_band_heuristic",
+        "scientific_status": "experimental_heuristic",
         "ab_initio": False,
         "active_space_method": active_space.method,
         "active_bands": list(active_space.active_orbitals),
