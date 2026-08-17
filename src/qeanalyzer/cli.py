@@ -8,54 +8,24 @@ from pathlib import Path
 
 from . import __version__
 from .io import PWInput, PWOutput, QEXMLOutput, read_pw_input, read_pw_output, read_qe_xml
+from .io.source_bundle import detect_and_load_sources
 from .models import build_run_result
 from .plotting import plot_relaxation_convergence, plot_scf_convergence, plot_workflow_history
-from .quantum import build_active_space_hamiltonian, select_active_space, write_fcidump
+from .quantum import build_band_model_hamiltonian, select_active_space, write_fcidump
 from .report import dump_result_json, generate_text_report, save_result_json, save_text_report
 from .workflow import WorkflowLedger, default_registry, plan_next_calculation
 
 
-def _detect_and_load_sources(paths: list[str]) -> tuple[PWInput | None, PWOutput | None, QEXMLOutput | None, str | None]:
-    """Detect and parse inputs, outputs, and XML files from specified file or directory paths."""
-    pw_in: PWInput | None = None
-    pw_out: PWOutput | None = None
-    qe_xml: QEXMLOutput | None = None
-    input_text: str | None = None
+def _detect_and_load_sources(
+    paths: list[str],
+) -> tuple[PWInput | None, PWOutput | None, QEXMLOutput | None, str | None]:
+    """Resolve one coherent QE run from *paths*.
 
-    all_files: list[Path] = []
-    for p_str in paths:
-        p = Path(p_str)
-        if p.is_dir():
-            # Scan directory for relevant files
-            for f in p.glob("**/*"):
-                if f.is_file():
-                    all_files.append(f)
-        elif p.is_file():
-            all_files.append(p)
-
-    for f in all_files:
-        name = f.name.lower()
-        if name.endswith(".xml") or name == "data-file-schema.xml":
-            if qe_xml is None:
-                try:
-                    qe_xml = read_qe_xml(f)
-                except Exception:
-                    pass
-        elif name.endswith(".out") or name.endswith(".log"):
-            if pw_out is None:
-                try:
-                    pw_out = read_pw_output(f)
-                except Exception:
-                    pass
-        elif name.endswith(".in") or name.endswith(".pwi"):
-            if pw_in is None:
-                try:
-                    input_text = f.read_text()
-                    pw_in = read_pw_input(f)
-                except Exception:
-                    pass
-
-    return pw_in, pw_out, qe_xml, input_text
+    Delegates to the shared resolver so that importing this module directly gets
+    the same run-coherence guarantees as the console entry point; the boundary
+    lives in the library rather than in a CLI facade.
+    """
+    return detect_and_load_sources(paths)
 
 
 def cmd_dump(args: argparse.Namespace) -> int:
@@ -325,7 +295,12 @@ def cmd_export_fcidump(args: argparse.Namespace) -> int:
                 emax_ev=args.emax,
             )
 
-        ham = build_active_space_hamiltonian(
+        sys.stderr.write(
+            "WARNING: export-fcidump currently exports a parameterized QE band-derived model, "
+            "not an ab-initio QE Hamiltonian. For physical materials integrals use "
+            "QE -> Wannier/downfolding/cRPA -> build_integral_hamiltonian -> FCIDUMP.\n"
+        )
+        ham = build_band_model_hamiltonian(
             state=result,
             active_space=asp,
             onsite_u_ev=args.u,
@@ -624,30 +599,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_COMMANDS = {
+    "dump": cmd_dump,
+    "report": cmd_report,
+    "plot": cmd_plot,
+    "plot-history": cmd_plot_history,
+    "next": cmd_next,
+    "history": cmd_history,
+    "validate": cmd_validate,
+    "export-fcidump": cmd_export_fcidump,
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entrypoint."""
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "dump":
-        return cmd_dump(args)
-    if args.command == "report":
-        return cmd_report(args)
-    if args.command == "plot":
-        return cmd_plot(args)
-    if args.command == "plot-history":
-        return cmd_plot_history(args)
-    if args.command == "next":
-        return cmd_next(args)
-    if args.command == "history":
-        return cmd_history(args)
-    if args.command == "validate":
-        return cmd_validate(args)
-    if args.command == "export-fcidump":
-        return cmd_export_fcidump(args)
+    handler = _COMMANDS.get(args.command)
+    if handler is None:
+        parser.print_help()
+        return 0
 
-    parser.print_help()
-    return 0
+    # Source-resolution and validation errors are user-facing conditions, not
+    # crashes: report them on stderr and exit non-zero rather than letting a
+    # traceback escape to the shell.
+    try:
+        return handler(args)
+    except (ValueError, FileNotFoundError, OSError) as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
 
 
 if __name__ == "__main__":

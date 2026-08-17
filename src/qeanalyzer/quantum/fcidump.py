@@ -1,21 +1,29 @@
-"""FCIDUMP format reader and deterministic exporter for electronic Hamiltonians."""
+"""Restricted real FCIDUMP reader/writer with an explicit Hartree boundary."""
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import Any
 
 from qeanalyzer.quantum.hamiltonian import MaterialHamiltonian
+from qeanalyzer.quantum.units import energy_to_hartree, require_integer_electron_sector
+
+_HEADER_START = re.compile(r"^\s*&(FCI|FCIDUMP)\b", re.IGNORECASE)
+_HEADER_END = re.compile(r"&END\b|/", re.IGNORECASE)
 
 
-def _format_fortran_value(val: Any) -> str:
-    """Format Python values into Fortran namelist literal syntax."""
-    if isinstance(val, bool):
-        return ".TRUE." if val else ".FALSE."
-    if isinstance(val, (list, tuple)):
-        return ",".join(str(x) for x in val)
-    return str(val)
+def _fortran_float(token: str) -> float:
+    value = float(token.replace("D", "E").replace("d", "e"))
+    if not math.isfinite(value):
+        raise ValueError("FCIDUMP coefficients must be finite")
+    return value
+
+
+def _pair_index(i: int, j: int) -> int:
+    """Packed lower-triangle index for zero-based i>=j."""
+    return i * (i + 1) // 2 + j
 
 
 def write_fcidump(
@@ -25,195 +33,171 @@ def write_fcidump(
     isym: int = 1,
     tolerance: float = 1e-12,
 ) -> str:
-    """Export MaterialHamiltonian to standard electronic FCIDUMP format.
+    """Export a restricted real Hamiltonian to FCIDUMP.
 
-    Parameters
-    ----------
-    hamiltonian : MaterialHamiltonian
-        The electronic Hamiltonian containing 1-body and 2-body integrals.
-    path : str or Path, optional
-        Destination file path to save FCIDUMP output.
-    orbsym : list of int, optional
-        Orbital point-group symmetry irreps (default: all 1).
-    isym : int, optional
-        Total wave function symmetry irrep (default: 1).
-    tolerance : float, optional
-        Threshold below which integrals are omitted as zero (default: 1e-12).
-
-    Returns
-    -------
-    str
-        Formatted FCIDUMP text.
+    FCIDUMP has no unit field.  This writer therefore converts every energy
+    quantity to **Hartree**, regardless of ``hamiltonian.energy_unit``.  This
+    makes files interoperable with PySCF, NECI, Dice, ``clifford_qc`` and other
+    conventional consumers.
     """
+    if tolerance < 0.0:
+        raise ValueError("tolerance must be non-negative")
+    if not hamiltonian.is_hermitian():
+        raise ValueError("Hamiltonian must satisfy restricted real integral symmetries")
     norb = hamiltonian.n_orbitals
-    nelec = int(round(hamiltonian.n_electrons))
-    ms2 = hamiltonian.spin
-    sym_list = orbsym if orbsym is not None else [1] * norb
+    nelec = require_integer_electron_sector(hamiltonian.n_electrons)
+    ms2 = int(hamiltonian.spin)
+    if abs(ms2) > nelec or (nelec + ms2) % 2:
+        raise ValueError("NELEC and MS2 do not define an integer alpha/beta sector")
+    sym = list(orbsym) if orbsym is not None else [1] * norb
+    if len(sym) != norb:
+        raise ValueError("ORBSYM must contain exactly NORB entries")
 
-    # 1. Header namelist &FCI
     lines = [
         "&FCI",
         f" NORB={norb},",
         f" NELEC={nelec},",
         f" MS2={ms2},",
-        f" ORBSYM={','.join(str(s) for s in sym_list)},",
-        f" ISYM={isym},",
+        f" ORBSYM={','.join(str(int(x)) for x in sym)},",
+        f" ISYM={int(isym)},",
+        " IUHF=0,",
         "/",
     ]
 
-    # 2. 2-Body Integrals in Chemists' notation (ij|kl)
-    # Canonical index ordering: i >= j, k >= l, and pair(i, j) >= pair(k, l)
-    # pair index: p_idx(i, j) = i * (i + 1) // 2 + j
-    for i in range(1, norb + 1):
-        for j in range(1, i + 1):
-            ij_pair = i * (i + 1) // 2 + j
-            for k in range(1, norb + 1):
-                for l in range(1, k + 1):
-                    kl_pair = k * (k + 1) // 2 + l
-                    if ij_pair < kl_pair:
+    # h2[p][q][r][s] is exactly chemist (pq|rs).  Write one representative
+    # from each eightfold symmetry class.
+    for i in range(norb):
+        for j in range(i + 1):
+            ij = _pair_index(i, j)
+            for k in range(norb):
+                for l in range(k + 1):
+                    if ij < _pair_index(k, l):
                         continue
+                    value = energy_to_hartree(hamiltonian.h2[i][j][k][l], hamiltonian.energy_unit)
+                    if abs(value) > tolerance:
+                        lines.append(f"{value:23.16E} {i+1:4d} {j+1:4d} {k+1:4d} {l+1:4d}")
 
-                    # Retrieve (ij|kl) in chemists' notation: h2[i-1][j-1][k-1][l-1]
-                    val = hamiltonian.h2[i - 1][j - 1][k - 1][l - 1]
-                    if abs(val) > tolerance:
-                        lines.append(f"{val:23.16E} {i:4d} {j:4d} {k:4d} {l:4d}")
+    for i in range(norb):
+        for j in range(i + 1):
+            value = energy_to_hartree(hamiltonian.h1[i][j], hamiltonian.energy_unit)
+            if abs(value) > tolerance:
+                lines.append(f"{value:23.16E} {i+1:4d} {j+1:4d} {0:4d} {0:4d}")
 
-    # 3. 1-Body Integrals h_ij (i >= j, k=0, l=0)
-    for i in range(1, norb + 1):
-        for j in range(1, i + 1):
-            val = hamiltonian.h1[i - 1][j - 1]
-            if abs(val) > tolerance:
-                lines.append(f"{val:23.16E} {i:4d} {j:4d} {0:4d} {0:4d}")
-
-    # 4. Constant energy shift E_const (i=0, j=0, k=0, l=0)
-    const_val = hamiltonian.constant
-    lines.append(f"{const_val:23.16E} {0:4d} {0:4d} {0:4d} {0:4d}")
-
+    core = energy_to_hartree(hamiltonian.constant, hamiltonian.energy_unit)
+    lines.append(f"{core:23.16E} {0:4d} {0:4d} {0:4d} {0:4d}")
     text = "\n".join(lines) + "\n"
-
     if path is not None:
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text, encoding="utf-8")
-
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(text, encoding="utf-8")
     return text
 
 
+def _parse_header(lines: list[str]) -> tuple[dict[str, str], int]:
+    header_parts: list[str] = []
+    start = None
+    for idx, original in enumerate(lines):
+        line = original.split("!", 1)[0].split("#", 1)[0].strip()
+        if not line:
+            continue
+        if start is None and _HEADER_START.match(line) is None:
+            raise ValueError("FCIDUMP must start with &FCI or &FCIDUMP")
+        start = 0
+        header_parts.append(line)
+        if _HEADER_END.search(line):
+            header = " ".join(header_parts)
+            data: dict[str, str] = {}
+            for match in re.finditer(r"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^,&/]+(?:,[^A-Za-z&/][^&/]*)?)", header):
+                data[match.group(1).upper()] = match.group(2).strip().rstrip(",")
+            # Simpler scalar extraction overrides the permissive regex above.
+            for key in ("NORB", "NELEC", "MS2", "ISYM", "IUHF"):
+                m = re.search(rf"\b{key}\s*=\s*([^,\s/&]+)", header, re.IGNORECASE)
+                if m:
+                    data[key] = m.group(1)
+            m = re.search(r"\bORBSYM\s*=\s*(.*?)(?=\bISYM\s*=|\bIUHF\s*=|&END\b|/|$)", header, re.IGNORECASE)
+            if m:
+                data["ORBSYM"] = m.group(1).strip(" ,")
+            return data, idx + 1
+    raise ValueError("FCIDUMP header is missing a terminator")
+
+
 def parse_fcidump(text: str) -> MaterialHamiltonian:
-    """Parse standard FCIDUMP content string into a MaterialHamiltonian.
+    """Parse restricted real FCIDUMP values as Hartree.
 
-    Parameters
-    ----------
-    text : str
-        FCIDUMP file content.
-
-    Returns
-    -------
-    MaterialHamiltonian
-        Reconstructed Hamiltonian with 1-body and 2-body integrals.
+    The returned ``MaterialHamiltonian.energy_unit`` is always ``"Hartree"``;
+    FCIDUMP itself cannot communicate any alternative unit.
     """
-    lines = text.strip().splitlines()
-    if not lines:
-        raise ValueError("Empty FCIDUMP content.")
+    lines = text.splitlines()
+    if not any(line.strip() for line in lines):
+        raise ValueError("Empty FCIDUMP content")
+    header, body_start = _parse_header(lines)
+    if "NORB" not in header:
+        raise ValueError("NORB parameter missing in FCIDUMP header")
+    norb = int(header["NORB"])
+    nelec = int(header.get("NELEC", "0"))
+    ms2 = int(header.get("MS2", "0"))
+    iuhf = int(header.get("IUHF", "0"))
+    if iuhf != 0:
+        raise NotImplementedError("Unrestricted FCIDUMP (IUHF=1) is not supported")
+    if norb <= 0 or not 0 <= nelec <= 2 * norb:
+        raise ValueError("Invalid NORB/NELEC sector")
+    if abs(ms2) > nelec or (nelec + ms2) % 2:
+        raise ValueError("NELEC and MS2 are incompatible")
 
-    # 1. Parse header namelist
-    header_lines: list[str] = []
-    body_start_idx = 0
-
-    for idx, line in enumerate(lines):
-        header_lines.append(line)
-        if "/" in line or "&END" in line.upper():
-            body_start_idx = idx + 1
-            break
-
-    header_text = " ".join(header_lines)
-
-    # Extract NORB, NELEC, MS2
-    norb_match = re.search(r"NORB\s*=\s*(\d+)", header_text, re.IGNORECASE)
-    if not norb_match:
-        raise ValueError("NORB parameter missing in FCIDUMP header.")
-    norb = int(norb_match.group(1))
-
-    nelec_match = re.search(r"NELEC\s*=\s*(\d+)", header_text, re.IGNORECASE)
-    nelec = int(nelec_match.group(1)) if nelec_match else 0
-
-    ms2_match = re.search(r"MS2\s*=\s*(-?\d+)", header_text, re.IGNORECASE)
-    ms2 = int(ms2_match.group(1)) if ms2_match else 0
-
-    # Initialize integral tensors
-    h1 = [[0.0 for _ in range(norb)] for _ in range(norb)]
+    h1 = [[0.0] * norb for _ in range(norb)]
     h2 = [[[[0.0 for _ in range(norb)] for _ in range(norb)] for _ in range(norb)] for _ in range(norb)]
     constant = 0.0
 
-    # 2. Parse body integral lines
-    for line in lines[body_start_idx:]:
-        parts = line.strip().split()
-        if not parts:
-            continue
-        if len(parts) != 5:
-            continue
+    def two_perms(i: int, j: int, k: int, l: int) -> set[tuple[int, int, int, int]]:
+        return {
+            (i, j, k, l), (j, i, k, l), (i, j, l, k), (j, i, l, k),
+            (k, l, i, j), (l, k, i, j), (k, l, j, i), (l, k, j, i),
+        }
 
+    for line_number, original in enumerate(lines[body_start:], start=body_start + 1):
+        line = original.split("!", 1)[0].split("#", 1)[0].strip()
+        if not line:
+            continue
+        fields = line.split()
+        if len(fields) != 5:
+            raise ValueError(f"FCIDUMP line {line_number} must contain coefficient and four indices")
+        value = _fortran_float(fields[0])
         try:
-            val = float(parts[0])
-            i = int(parts[1])
-            j = int(parts[2])
-            k = int(parts[3])
-            l = int(parts[4])
-        except ValueError:
-            continue
-
-        if i == 0 and j == 0 and k == 0 and l == 0:
-            # Constant energy shift
-            constant = val
-        elif k == 0 and l == 0:
-            # 1-body integral h_{ij} = h_{ji}
-            p = i - 1
-            q = j - 1
-            if 0 <= p < norb and 0 <= q < norb:
-                h1[p][q] = val
-                h1[q][p] = val
+            i, j, k, l = (int(x) for x in fields[1:])
+        except ValueError as exc:
+            raise ValueError(f"FCIDUMP line {line_number} has non-integer indices") from exc
+        if any(idx < 0 or idx > norb for idx in (i, j, k, l)):
+            raise ValueError(f"FCIDUMP line {line_number} index outside [0,NORB]")
+        if (i, j, k, l) == (0, 0, 0, 0):
+            constant = value
+        elif i > 0 and j > 0 and k == 0 and l == 0:
+            h1[i - 1][j - 1] = value
+            h1[j - 1][i - 1] = value
+        elif all(idx > 0 for idx in (i, j, k, l)):
+            for p, q, r, s in two_perms(i - 1, j - 1, k - 1, l - 1):
+                h2[p][q][r][s] = value
         else:
-            # 2-body integral (ij|kl) in chemists' notation
-            # Map into h2[p][r][q][s] = (pr|qs) = (ij|kl)
-            # Permutations for 8-fold real symmetry:
-            # (ij|kl) = (ji|kl) = (ij|lk) = (ji|lk) = (kl|ij) = (lk|ij) = (kl|ji) = (lk|ji)
-            perms = [
-                (i, j, k, l), (j, i, k, l), (i, j, l, k), (j, i, l, k),
-                (k, l, i, j), (l, k, i, j), (k, l, j, i), (l, k, j, i),
-            ]
-            for p1, p2, p3, p4 in perms:
-                # In chemist notation: (p1 p2 | p3 p4) -> in h2 tensor h2[p1-1][p3-1][p2-1][p4-1]
-                idx1 = p1 - 1
-                idx2 = p2 - 1
-                idx3 = p3 - 1
-                idx4 = p4 - 1
-                if 0 <= idx1 < norb and 0 <= idx2 < norb and 0 <= idx3 < norb and 0 <= idx4 < norb:
-                    h2[idx1][idx2][idx3][idx4] = val
+            raise ValueError(f"FCIDUMP line {line_number} uses an invalid zero sentinel pattern")
 
+    orbsym = [int(x) for x in re.split(r"[\s,]+", header.get("ORBSYM", "").strip()) if x]
     return MaterialHamiltonian(
         n_orbitals=norb,
         n_electrons=float(nelec),
         constant=constant,
         spin=ms2,
-        energy_unit="eV",
+        energy_unit="Hartree",
         h1=h1,
         h2=h2,
-        metadata={"source": "fcidump"},
+        metadata={
+            "source": "fcidump",
+            "model_kind": "explicit_integrals",
+            "integral_convention": "chemist_(pq|rs)",
+            "orbsym": orbsym or [1] * norb,
+            "isym": int(header.get("ISYM", "1")),
+            "fcidump_energy_unit": "Hartree",
+        },
     )
 
 
 def read_fcidump(path: str | Path) -> MaterialHamiltonian:
-    """Read an FCIDUMP file from disk and return a MaterialHamiltonian.
-
-    Parameters
-    ----------
-    path : str or Path
-        Path to the FCIDUMP file.
-
-    Returns
-    -------
-    MaterialHamiltonian
-        Parsed Hamiltonian.
-    """
-    text = Path(path).read_text(encoding="utf-8")
-    return parse_fcidump(text)
+    return parse_fcidump(Path(path).read_text(encoding="utf-8"))

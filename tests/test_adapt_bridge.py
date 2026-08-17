@@ -1,166 +1,117 @@
-"""Tests for QuantumSolver interface, ExactDiagonalizationSolver, and ADAPT-VQE bridge."""
+"""Quantum-solver boundary tests.
+
+Real ADAPT-VQE belongs to clifford_qc.  The local exact solver is an independent
+small-space reference, while the simulated ADAPT class is explicitly a plumbing
+mock.
+"""
 
 from __future__ import annotations
 
 import math
 import unittest
-from pathlib import Path
+import warnings
 
-from qeanalyzer.io import read_pw_output, read_qe_xml
-from qeanalyzer.models import build_run_result
-from qeanalyzer.quantum.active_space import select_active_space
-from qeanalyzer.quantum.adapt_bridge import (
+from qeanalyzer.quantum import (
     ADAPTVQESolver,
+    CliffordQCADAPTSolver,
     ExactDiagonalizationSolver,
     QuantumRunResult,
-    create_quantum_solver,
-    solve_active_space,
-)
-from qeanalyzer.quantum.hamiltonian import (
-    MaterialHamiltonian,
-    build_active_space_hamiltonian,
+    SimulatedADAPTVQESolver,
     build_hubbard_hamiltonian,
+    clifford_qc_available,
+    create_quantum_solver,
 )
-
-FIXTURES = Path(__file__).parent / "fixtures"
+from qeanalyzer.quantum.hamiltonian import MaterialHamiltonian
 
 
 class TestQuantumRunResult(unittest.TestCase):
-    """Test QuantumRunResult data structure and serialization."""
-
-    def test_serialization_roundtrip(self):
-        res = QuantumRunResult(
-            energy_ev=-15.456,
-            electronic_energy_ev=-25.456,
-            constant_energy_ev=10.0,
-            correlation_energy_ev=-0.85,
-            solver_type="adapt_vqe",
+    def test_roundtrip(self):
+        result = QuantumRunResult(
+            energy_ev=-1.0,
+            electronic_energy_ev=-2.0,
+            constant_energy_ev=1.0,
+            solver_type="exact_diagonalization",
             n_orbitals=2,
             n_electrons=2.0,
             n_spin_orbitals=4,
-            converged=True,
-            selected_operators=["E_{0,1}"],
-            operator_gradients=[0.0005],
-            operator_parameters=[0.12],
-            iteration_energies=[-15.0, -15.456],
-            one_rdm=[[1.0, 0.2], [0.2, 1.0]],
-            natural_occupations=[1.2, 0.8],
-            metadata={"pool_size": 1},
+            one_rdm=[[1.0, 0.1], [0.1, 1.0]],
         )
-        d = res.to_dict()
-        rec = QuantumRunResult.from_dict(d)
-
-        self.assertAlmostEqual(rec.energy_ev, -15.456)
-        self.assertAlmostEqual(rec.electronic_energy_ev, -25.456)
-        self.assertEqual(rec.solver_type, "adapt_vqe")
-        self.assertEqual(rec.selected_operators, ["E_{0,1}"])
-        self.assertEqual(rec.one_rdm, [[1.0, 0.2], [0.2, 1.0]])
-        self.assertEqual(rec.natural_occupations, [1.2, 0.8])
-        self.assertIn("Total Ground Energy: -15.456000 eV", rec.summary())
+        self.assertEqual(QuantumRunResult.from_dict(result.to_dict()).one_rdm, result.one_rdm)
 
 
-class TestExactDiagonalizationSolver(unittest.TestCase):
-    """Test Exact Configuration Interaction (FCI / ED) solver."""
-
-    def test_analytical_hubbard_dimer_ground_state(self):
-        # Half-filled symmetric Hubbard dimer: t=1.0, U=4.0, N=2 electrons (1 alpha, 1 beta)
-        # Analytical ground state electronic energy: E_gs = (U - sqrt(U^2 + 16*t^2)) / 2
-        t = 1.0
-        u = 4.0
-        e_exact_analytical = (u - math.sqrt(u**2 + 16.0 * t**2)) / 2.0  # 2 - sqrt(32) ≈ -0.82842712 eV
-
+class TestExactSolver(unittest.TestCase):
+    def test_hubbard_dimer_analytic(self):
+        t, u = 1.0, 4.0
+        expected = (u - math.sqrt(u * u + 16.0 * t * t)) / 2.0
         ham = build_hubbard_hamiltonian(
             n_orbitals=2,
             n_electrons=2.0,
             hopping_t={(0, 1): t, (1, 0): t},
             onsite_u=u,
         )
+        result = ExactDiagonalizationSolver().solve(ham)
+        self.assertAlmostEqual(result.energy_ev, expected, places=7)
+        self.assertAlmostEqual(sum(result.natural_occupations), 2.0, places=7)
+        self.assertAlmostEqual(sum(result.one_rdm[i][i] for i in range(2)), 2.0, places=7)
 
-        solver = ExactDiagonalizationSolver()
-        result = solver.solve(ham)
+    def test_hartree_input_is_reported_in_ev(self):
+        ham = MaterialHamiltonian(
+            n_orbitals=1,
+            n_electrons=1.0,
+            spin=1,
+            energy_unit="Hartree",
+            h1=[[1.0]],
+        )
+        result = ExactDiagonalizationSolver().solve(ham)
+        self.assertAlmostEqual(result.energy_ev, 27.211386245988, places=8)
 
-        self.assertTrue(result.converged)
-        self.assertAlmostEqual(result.electronic_energy_ev, e_exact_analytical, places=6)
-        self.assertAlmostEqual(result.energy_ev, e_exact_analytical, places=6)
-
-        # Verify 1-RDM: trace must equal N_electrons = 2.0
-        tr = sum(result.one_rdm[i][i] for i in range(2))
-        self.assertAlmostEqual(tr, 2.0, places=6)
-
-        # Symmetry: site occupations are equal (1.0 each)
-        self.assertAlmostEqual(result.one_rdm[0][0], 1.0, places=6)
-        self.assertAlmostEqual(result.one_rdm[1][1], 1.0, places=6)
-
-        # Off-diagonal hopping density matrix element
-        self.assertGreater(abs(result.one_rdm[0][1]), 0.0)
-
-        # Natural occupations sum to 2.0
-        self.assertAlmostEqual(sum(result.natural_occupations), 2.0, places=6)
-
-    def test_dft_silicon_active_space_solution(self):
-        xml = read_qe_xml(FIXTURES / "si_scf.xml")
-        pw_out = read_pw_output(FIXTURES / "si_scf.out")
-        res = build_run_result(pw_out=pw_out, qe_xml=xml, run_id="si-scf")
-
-        asp = select_active_space(res, method="band_index", band_start=1, band_end=2)
-        ham = build_active_space_hamiltonian(res, active_space=asp, onsite_u_ev=2.0)
-
-        solver = ExactDiagonalizationSolver()
-        q_res = solver.solve(ham, active_space=asp)
-
-        self.assertTrue(q_res.converged)
-        self.assertEqual(q_res.n_orbitals, 2)
-        self.assertAlmostEqual(q_res.constant_energy_ev, ham.constant)
-        self.assertAlmostEqual(sum(q_res.natural_occupations), ham.n_electrons, places=4)
+    def test_fractional_sector_rejected(self):
+        ham = build_hubbard_hamiltonian(n_orbitals=2, n_electrons=1.4)
+        with self.assertRaisesRegex(ValueError, "fractional"):
+            ExactDiagonalizationSolver().solve(ham)
 
 
-class TestADAPTVQESolver(unittest.TestCase):
-    """Test ADAPT-VQE algorithmic bridge and iteration growth."""
+class TestADAPTOwnership(unittest.TestCase):
+    def test_public_adapt_constructor_delegates_to_clifford_qc(self):
+        solver = ADAPTVQESolver()
+        self.assertIsInstance(solver, CliffordQCADAPTSolver)
+        self.assertIsInstance(create_quantum_solver("adapt_vqe"), CliffordQCADAPTSolver)
 
-    def test_adapt_vqe_hubbard_dimer(self):
+    def test_simulated_solver_is_explicit_mock(self):
         ham = build_hubbard_hamiltonian(
             n_orbitals=2,
             n_electrons=2.0,
             hopping_t={(0, 1): 1.0, (1, 0): 1.0},
             onsite_u=3.0,
         )
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            solver = SimulatedADAPTVQESolver(max_adapt_iterations=10)
+        self.assertTrue(any("workflow mock" in str(w.message) for w in caught))
+        result = solver.solve(ham)
+        self.assertEqual(result.solver_type, "simulated_adapt_workflow_mock")
+        self.assertEqual(result.metadata["scientific_status"], "workflow_mock")
+        self.assertIsNone(result.metadata["residual_gradient"])
+        self.assertEqual(result.operator_gradients, [])
 
-        solver = ADAPTVQESolver(gradient_threshold=1e-3, max_adapt_iterations=10)
-        res = solver.solve(ham)
+    @unittest.skipUnless(clifford_qc_available(), "clifford_qc optional sibling not installed")
+    def test_real_clifford_adapt_hubbard_dimer(self):
+        ham = build_hubbard_hamiltonian(
+            n_orbitals=2,
+            n_electrons=2.0,
+            hopping_t={(0, 1): 1.0, (1, 0): 1.0},
+            onsite_u=2.0,
+        )
+        result = CliffordQCADAPTSolver(
+            gradient_threshold=1e-6,
+            max_adapt_iterations=8,
+            compute_exact_reference=True,
+        ).solve(ham)
+        self.assertEqual(result.solver_type, "clifford_qc_adapt_vqe")
+        self.assertEqual(result.metadata["backend_project"], "gutama/clifford_qc")
+        self.assertIsNotNone(result.metadata["residual_gradient"])
+        self.assertAlmostEqual(sum(result.natural_occupations), 2.0, places=6)
 
-        self.assertEqual(res.solver_type, "adapt_vqe")
-        self.assertTrue(res.converged)
-        self.assertGreater(len(res.selected_operators), 0)
-        self.assertEqual(len(res.selected_operators), len(res.operator_parameters))
-        self.assertEqual(len(res.iteration_energies), len(res.selected_operators) + 1)
-
-        # Energy decreases monotonically with ADAPT operator growth
-        for i in range(len(res.iteration_energies) - 1):
-            self.assertLessEqual(res.iteration_energies[i + 1], res.iteration_energies[i] + 1e-6)
-
-        # Correlation energy is negative
-        self.assertIsNotNone(res.correlation_energy_ev)
-        self.assertLess(res.correlation_energy_ev, 0.0)
-
-
-class TestSolverFactoryAndConvenience(unittest.TestCase):
-    """Test solver instantiation and high-level execution."""
-
-    def test_create_solver_factory(self):
-        s_exact = create_quantum_solver("exact")
-        self.assertIsInstance(s_exact, ExactDiagonalizationSolver)
-
-        s_adapt = create_quantum_solver("adapt_vqe")
-        self.assertIsInstance(s_adapt, ADAPTVQESolver)
-
-        with self.assertRaises(ValueError):
-            create_quantum_solver("invalid_solver")
-
-    def test_solve_active_space_convenience(self):
-        ham = build_hubbard_hamiltonian(n_orbitals=2, n_electrons=2.0, hopping_t={(0, 1): 1.0, (1, 0): 1.0}, onsite_u=2.0)
-        res = solve_active_space(ham, solver_type="exact")
-        self.assertTrue(res.converged)
-        self.assertEqual(res.n_orbitals, 2)
 
 class TestFCISameSpinDoubleExcitations(unittest.TestCase):
     """Regression tests for alpha-alpha / beta-beta double excitations.
@@ -217,12 +168,12 @@ class TestFCISameSpinDoubleExcitations(unittest.TestCase):
     def test_two_electron_ground_state(self):
         """One alpha + one beta: no same-spin doubles exist, so this always held."""
         res = ExactDiagonalizationSolver().solve(self._model_hamiltonian(2.0))
-        self.assertAlmostEqual(res.energy_ev, -1.4337384453, places=7)
+        self.assertAlmostEqual(res.energy_ev, -1.4337384453, places=9)
 
     def test_four_electron_ground_state(self):
         """Two alpha + two beta: requires the same-spin double block to be present."""
         res = ExactDiagonalizationSolver().solve(self._model_hamiltonian(4.0))
-        self.assertAlmostEqual(res.energy_ev, -0.9315163058, places=7)
+        self.assertAlmostEqual(res.energy_ev, -0.9315163058, places=9)
 
     def test_energy_invariant_under_orbital_rotation(self):
         """The FCI energy is basis independent; a truncated CI expansion is not.
@@ -261,7 +212,7 @@ class TestFCISameSpinDoubleExcitations(unittest.TestCase):
         self.assertAlmostEqual(
             solver.solve(ham).energy_ev,
             solver.solve(rotated).energy_ev,
-            places=6,
+            places=9,
         )
 
     def test_high_spin_state_ground_state(self):
