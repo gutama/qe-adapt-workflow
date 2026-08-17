@@ -124,6 +124,27 @@ def _weights(el: QEElectronicState, n: int) -> list[float]:
     return weights
 
 
+def _gamma_kpoint_index(el: QEElectronicState) -> int:
+    """Locate the Gamma point rather than assuming it is listed first.
+
+    QE does not guarantee any particular ordering of the IBZ k-point list, so
+    reading index 0 can silently sample a zone-boundary point instead.
+    """
+    coords = el.kpoint_coordinates
+    if not coords:
+        raise ValueError(
+            "kpoint_mode='gamma' needs k-point coordinates to identify the Gamma point, "
+            "and this result carries none. Use kpoint_mode='average' or 'any' instead."
+        )
+    for index, point in enumerate(coords):
+        if all(abs(component) <= 1e-8 for component in point):
+            return index
+    raise ValueError(
+        "kpoint_mode='gamma' was requested but no k-point at (0, 0, 0) is present in this "
+        "result. Use kpoint_mode='average' or 'any' instead."
+    )
+
+
 def _weighted_band_average(rows: list[list[float]], band: int, weights: list[float]) -> float | None:
     pairs = [(row[band], weights[k]) for k, row in enumerate(rows) if band < len(row)]
     if not pairs:
@@ -152,8 +173,12 @@ def _build_space(el: QEElectronicState, *, method: str, active: list[int], metad
     if not active:
         raise ValueError("active-space selection produced no bands")
     n_bands = el.n_bands or max(active) + 1
-    minimum, maximum = min(active), max(active)
-    frozen_core = list(range(minimum))
+    maximum = max(active)
+    # Every band below the top of the active window that is not itself active is
+    # frozen -- including bands interior to a non-contiguous selection. Deriving
+    # this from min(active) alone left those gap bands in no category at all, so
+    # their electrons vanished from n_active_electrons + n_core_electrons.
+    frozen_core = [band for band in range(maximum) if band not in set(active)]
     frozen_virtual = list(range(maximum + 1, n_bands))
     active_e, core_e = _electron_partition(el, active, frozen_core)
     fermi = el.fermi_energy_ev if el.fermi_energy_ev is not None else el.highest_occupied_ev
@@ -205,6 +230,7 @@ class EnergyWindowSelector(ActiveSpaceSelector):
         high = reference + self.emax_ev if self.relative_to_fermi else self.emax_ev
         n_bands = el.n_bands or len(el.eigenvalues_ev[0])
         weights = _weights(el, len(el.eigenvalues_ev))
+        gamma_index = _gamma_kpoint_index(el) if self.kpoint_mode == "gamma" else 0
         active: list[int] = []
         for band in range(n_bands):
             vals = [row[band] for row in el.eigenvalues_ev if band < len(row)]
@@ -216,7 +242,8 @@ class EnergyWindowSelector(ActiveSpaceSelector):
                 avg = _weighted_band_average(el.eigenvalues_ev, band, weights)
                 include = avg is not None and low <= avg <= high
             else:
-                include = low <= vals[0] <= high
+                gamma_row = el.eigenvalues_ev[gamma_index]
+                include = band < len(gamma_row) and low <= gamma_row[band] <= high
             if include:
                 active.append(band)
         if not active:

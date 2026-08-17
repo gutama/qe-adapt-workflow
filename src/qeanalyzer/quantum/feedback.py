@@ -91,11 +91,11 @@ class OccupationFeedbackPolicy(QuantumFeedbackPolicy):
             self.correlation_threshold < occ < 2.0 - self.correlation_threshold
             for occ in occupations
         )
-        changes: dict[str, dict[str, Any]] = {
-            "CONTROL": {"calculation": "scf"},
-            "ELECTRONS": {"mixing_beta": 0.3, "conv_thr": 1.0e-8},
-        }
+        changes: dict[str, dict[str, Any]] = {"CONTROL": {"calculation": "scf"}}
         if correlated:
+            # Only the triggered branch touches SCF controls; the other branch says
+            # it retains them and must not quietly rewrite mixing/convergence.
+            changes["ELECTRONS"] = {"mixing_beta": 0.3, "conv_thr": 1.0e-8}
             changes["SYSTEM"] = {
                 "occupations": "smearing",
                 "smearing": self.target_smearing,
@@ -125,19 +125,27 @@ class ActiveSpaceFeedbackPolicy(QuantumFeedbackPolicy):
         occupations = quantum_result.natural_occupations
         lowest = occupations[-1] if occupations else None
         expand = lowest is not None and lowest > self.boundary_occupation_threshold
-        current = qe_result.electronic.n_bands or 8
-        target = current + self.band_increment if expand else current
-        reason = (
-            f"Lowest natural occupation {lowest:.4g} exceeds heuristic threshold; request nbnd={target}."
-            if expand else
-            "Current natural occupations do not trigger heuristic band-count expansion."
-        )
-        return self._decision(
-            qe_result,
-            reason,
-            {"CONTROL": {"calculation": "scf"}, "SYSTEM": {"nbnd": target}},
-            prev_input,
-        )
+        current = qe_result.electronic.n_bands
+
+        # nbnd is emitted only when the heuristic actually asks for more bands, and
+        # only when the current count is known. Writing a fallback nbnd on the
+        # no-change branch silently constrained inputs that never set one.
+        changes: dict[str, dict[str, Any]] = {"CONTROL": {"calculation": "scf"}}
+        if not expand:
+            reason = "Current natural occupations do not trigger heuristic band-count expansion."
+        elif current is None:
+            reason = (
+                f"Lowest natural occupation {lowest:.4g} exceeds heuristic threshold, but the run "
+                "reports no band count, so no nbnd target can be derived; set nbnd explicitly."
+            )
+        else:
+            target = current + self.band_increment
+            changes["SYSTEM"] = {"nbnd": target}
+            reason = (
+                f"Lowest natural occupation {lowest:.4g} exceeds heuristic threshold; "
+                f"request nbnd={target}."
+            )
+        return self._decision(qe_result, reason, changes, prev_input)
 
 
 class HubbardUFeedbackPolicy(QuantumFeedbackPolicy):
