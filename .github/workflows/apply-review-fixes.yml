@@ -19,9 +19,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f .review_fixes.tar.gz.b64
-          tar -xzf .review_fixes.tar.gz.b64 -C .
-          rm -f .review_fixes.tar.gz.b64 .github/workflows/apply-review-fixes.yml
+          cat .review_chunk_00 .review_chunk_01 .review_chunk_02 .review_chunk_03 .review_chunk_04 .review_chunk_05 .review_chunk_06 .review_chunk_07 .review_chunk_08 .review_chunk_09 > /tmp/review-fixes.tar.gz
+          tar -tzf /tmp/review-fixes.tar.gz >/dev/null
+          tar -xzf /tmp/review-fixes.tar.gz -C .
+          rm -f .review_chunk_* .review_fixes.tar.gz.b64 .github/workflows/apply-review-fixes.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
