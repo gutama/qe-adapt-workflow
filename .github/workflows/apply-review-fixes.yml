@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   apply:
-    if: ${{ hashFiles('.review_fixes.tar.gz.b64') != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +19,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test -f .review_fixes.tar.gz.b64
           base64 --decode .review_fixes.tar.gz.b64 > /tmp/review-fixes.tar.gz
           tar -xzf /tmp/review-fixes.tar.gz -C .
           rm -f .review_fixes.tar.gz.b64 .github/workflows/apply-review-fixes.yml
