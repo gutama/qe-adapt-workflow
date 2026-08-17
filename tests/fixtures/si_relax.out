@@ -1,0 +1,180 @@
+     Program PWSCF v.7.2 starts on 15Aug2024 at 10:45:00 
+
+     This program is part of the open-source Quantum ESPRESSO suite
+     for quantum simulation of materials; please cite
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 21 395502 (2009);
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 29 465901 (2017);
+         "P. Giannozzi et al., J. Chem. Phys. 152 154105 (2020);
+          URL http://www.quantum-espresso.org", 
+     in publications or presentations arising from this work. More details at
+     http://www.quantum-espresso.org/quote
+
+     Parallel version (MPI), running on     4 processors
+     Threads/MPI process:     1
+
+     MPI processes distributed on     1 nodes
+     236 MiB available memory on the printing node
+
+     Reading input from si_relax.in
+
+     atomic species   valence    mass     pseudopotential
+        Si             4.00    28.08600     Si( 1.00)
+
+     bravais-lattice index     =            2
+     lattice parameter (BOHR)  =      10.2000
+     unit-cell volume          =     265.3020 (a.u.)^3
+     number of atoms/cell      =            2
+     number of atomic types    =            1
+     number of electrons       =         8.00
+     number of Kohn-Sham states=            4
+     kinetic-energy cutoff     =      30.0000  Ry
+     charge-density cutoff     =     240.0000  Ry
+
+     number of k points=    10
+
+     mixing beta               =       0.7000
+
+     Starting magnetic structure 
+     Atomic positions and kinds:
+     Si 1 0.000000 0.000000 0.000000
+     Si 2 0.260000 0.260000 0.260000
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-02,  avg # of iterations =  2.0
+
+     total energy              =     -15.82000000 Ry
+     estimated scf accuracy    <       0.10000000 Ry
+
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-03,  avg # of iterations =  2.0
+
+     total energy              =     -15.83500000 Ry
+     estimated scf accuracy    <       0.01000000 Ry
+
+     iteration #  3     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-04,  avg # of iterations =  2.0
+
+     total energy              =     -15.83850000 Ry
+     estimated scf accuracy    <       0.00000010 Ry
+
+     convergence has been achieved in      3 iterations
+
+!    total energy              =     -15.83850000 Ry
+     one-electron contribution =       4.80000000 Ry
+     hartree contribution      =       1.10000000 Ry
+     xc contribution           =      -4.80000000 Ry
+     ewald contribution        =     -16.93850000 Ry
+
+     Forces acting on atoms (cartesian axes, Ry/au):
+
+     atom    1 type  1   force =     0.05000000    0.05000000    0.05000000
+     atom    2 type  1   force =    -0.05000000   -0.05000000   -0.05000000
+
+     Total force =     0.122474     Total SCF correction =     0.000050
+
+     Writing output data file ./tmp/silicon.save/
+
+     new calculation: restart with different structure
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-02,  avg # of iterations =  2.0
+
+     total energy              =     -15.85000000 Ry
+     estimated scf accuracy    <       0.05000000 Ry
+
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-03,  avg # of iterations =  2.0
+
+     total energy              =     -15.85300000 Ry
+     estimated scf accuracy    <       0.00100000 Ry
+
+     iteration #  3     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-04,  avg # of iterations =  2.0
+
+     total energy              =     -15.85400000 Ry
+     estimated scf accuracy    <       0.00000005 Ry
+
+     convergence has been achieved in      3 iterations
+
+!    total energy              =     -15.85400000 Ry
+     one-electron contribution =       4.83000000 Ry
+     hartree contribution      =       1.12000000 Ry
+     xc contribution           =      -4.84000000 Ry
+     ewald contribution        =     -16.9640000 Ry
+
+     Forces acting on atoms (cartesian axes, Ry/au):
+
+     atom    1 type  1   force =     0.00500000    0.00500000    0.00500000
+     atom    2 type  1   force =    -0.00500000   -0.00500000   -0.00500000
+
+     Total force =     0.012247     Total SCF correction =     0.000010
+
+     Writing output data file ./tmp/silicon.save/
+
+     new calculation: restart with different structure
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-02,  avg # of iterations =  2.0
+
+     total energy              =     -15.85430000 Ry
+     estimated scf accuracy    <       0.00100000 Ry
+
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-04,  avg # of iterations =  2.0
+
+     total energy              =     -15.85434567 Ry
+     estimated scf accuracy    <       0.00000001 Ry
+
+     convergence has been achieved in      2 iterations
+
+!    total energy              =     -15.85434567 Ry
+     one-electron contribution =       4.83456789 Ry
+     hartree contribution      =       1.12345678 Ry
+     xc contribution           =      -4.84567890 Ry
+     ewald contribution        =     -16.96668944 Ry
+
+     highest occupied, lowest unoccupied level (ev):     6.2140    7.3940
+
+     Forces acting on atoms (cartesian axes, Ry/au):
+
+     atom    1 type  1   force =     0.00000010    0.00000010    0.00000010
+     atom    2 type  1   force =    -0.00000010   -0.00000010   -0.00000010
+
+     Total force =     0.000000     Total SCF correction =     0.000001
+
+     bfgs converged in   3 scf cycles and   3 bfgs steps
+     (criteria: energy <  1.0E-04 Ry, force <  1.0E-03 Ry/Bohr)
+
+     End of BFGS Geometry Optimization
+
+     Final energy   =     -15.85434567 Ry
+
+Begin final coordinates
+     new unit-cell volume =     265.30200 a.u.^3 (    39.31200 Ang^3 )
+
+ATOMIC_POSITIONS (crystal)
+Si       0.0000000000        0.0000000000        0.0000000000
+Si       0.2500000000        0.2500000000        0.2500000000
+End final coordinates
+
+     PWSCF        :      1.25s CPU      1.60s WALL
+
+   This run was terminated on:  10:45:02  15Aug2024            
+
+=------------------------------------------------------------------------------=
+   JOB DONE.
+=------------------------------------------------------------------------------=

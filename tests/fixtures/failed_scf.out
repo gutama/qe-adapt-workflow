@@ -1,0 +1,123 @@
+     Program PWSCF v.7.2 starts on 15Aug2024 at 11:15:00 
+
+     This program is part of the open-source Quantum ESPRESSO suite
+     for quantum simulation of materials; please cite
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 21 395502 (2009);
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 29 465901 (2017);
+         "P. Giannozzi et al., J. Chem. Phys. 152 154105 (2020);
+          URL http://www.quantum-espresso.org", 
+     in publications or presentations arising from this work. More details at
+     http://www.quantum-espresso.org/quote
+
+     Parallel version (MPI), running on     4 processors
+     Threads/MPI process:     1
+
+     MPI processes distributed on     1 nodes
+     236 MiB available memory on the printing node
+
+     Reading input from failed_scf.in
+
+     atomic species   valence    mass     pseudopotential
+        Si             4.00    28.08600     Si( 1.00)
+
+     bravais-lattice index     =            2
+     lattice parameter (BOHR)  =      10.2000
+     unit-cell volume          =     265.3020 (a.u.)^3
+     number of atoms/cell      =            2
+     number of atomic types    =            1
+     number of electrons       =         8.00
+     number of Kohn-Sham states=            4
+     kinetic-energy cutoff     =      10.0000  Ry
+     charge-density cutoff     =      40.0000  Ry
+
+     number of k points=    10
+
+     mixing beta               =       0.0100
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-02,  avg # of iterations =  2.0
+
+     total energy              =     -15.80000000 Ry
+     estimated scf accuracy    <       0.12000000 Ry
+
+     iteration #  2     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-03,  avg # of iterations =  2.0
+
+     total energy              =     -15.81000000 Ry
+     estimated scf accuracy    <       0.05000000 Ry
+
+     iteration #  3     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-04,  avg # of iterations =  2.0
+
+     total energy              =     -15.81500000 Ry
+     estimated scf accuracy    <       0.02000000 Ry
+
+     iteration #  4     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-04,  avg # of iterations =  2.0
+
+     total energy              =     -15.81700000 Ry
+     estimated scf accuracy    <       0.01000000 Ry
+
+     iteration #  5     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-05,  avg # of iterations =  2.0
+
+     total energy              =     -15.81800000 Ry
+     estimated scf accuracy    <       0.00500000 Ry
+
+     iteration #  6     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-05,  avg # of iterations =  2.0
+
+     total energy              =     -15.81850000 Ry
+     estimated scf accuracy    <       0.00200000 Ry
+
+     iteration #  7     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-05,  avg # of iterations =  2.0
+
+     total energy              =     -15.81880000 Ry
+     estimated scf accuracy    <       0.00100000 Ry
+
+     iteration #  8     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-05,  avg # of iterations =  2.0
+
+     total energy              =     -15.81900000 Ry
+     estimated scf accuracy    <       0.00050000 Ry
+
+     iteration #  9     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-05,  avg # of iterations =  2.0
+
+     total energy              =     -15.81910000 Ry
+     estimated scf accuracy    <       0.00020000 Ry
+
+     iteration # 10     ecut=    10.00 Ry     beta= 0.01
+     Davidson diagonalization with overlap
+     ethr =  1.00E-05,  avg # of iterations =  2.0
+
+     total energy              =     -15.81915000 Ry
+     estimated scf accuracy    <       0.00010000 Ry
+
+     convergence NOT achieved after  10 iterations: stopping
+
+!    total energy              =     -15.81915000 Ry
+     one-electron contribution =       4.80000000 Ry
+     hartree contribution      =       1.10000000 Ry
+     xc contribution           =      -4.80000000 Ry
+     ewald contribution        =     -16.91915000 Ry
+
+     PWSCF        :      0.85s CPU      1.10s WALL
+
+   This run was terminated on:  11:15:01  15Aug2024            
+
+=------------------------------------------------------------------------------=
+   JOB DONE.
+=------------------------------------------------------------------------------=

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<qes:espresso xmlns:qes="http://www.quantum-espresso.org/ns/qes/qes-1.0"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              SCHEMA_VERSION="1.0.0">
+  <general_info>
+    <creator NAME="PWSCF" VERSION="7.2"/>
+    <job_title>aluminum_metal</job_title>
+  </general_info>
+  <parallel_info>
+    <nprocs>4</nprocs>
+    <nthreads>1</nthreads>
+  </parallel_info>
+  <input>
+    <control_variables>
+      <title>aluminum</title>
+      <calculation>scf</calculation>
+      <restart_mode>from_scratch</restart_mode>
+      <prefix>al</prefix>
+      <outdir>./tmp</outdir>
+      <pseudo_dir>./pseudo</pseudo_dir>
+    </control_variables>
+    <atomic_species ntyp="1">
+      <species name="Al">
+        <mass>26.98200</mass>
+        <pseudo_file>Al.pbe-n-kjpaw_psl.1.0.0.UPF</pseudo_file>
+      </species>
+    </atomic_species>
+    <atomic_structure nat="1" alat="7.6300000000">
+      <atomic_positions>
+        <atom name="Al" index="1">0.0000000000 0.0000000000 0.0000000000</atom>
+      </atomic_positions>
+      <cell>
+        <a1>0.0000000000 3.8150000000 3.8150000000</a1>
+        <a2>3.8150000000 0.0000000000 3.8150000000</a2>
+        <a3>3.8150000000 3.8150000000 0.0000000000</a3>
+      </cell>
+    </atomic_structure>
+    <bands>
+      <nbnd>6</nbnd>
+      <smearing>mp</smearing>
+      <degauss units="Hartree">0.010000</degauss>
+      <occupations>smearing</occupations>
+    </bands>
+    <k_points_ibz>
+      <nk>2</nk>
+      <k_point weight="0.500000">0.000000 0.000000 0.000000</k_point>
+      <k_point weight="0.500000">0.500000 0.500000 0.500000</k_point>
+    </k_points_ibz>
+  </input>
+  <output>
+    <convergence_info>
+      <scf_conv>
+        <n_scf_steps>6</n_scf_steps>
+        <scf_error>5.000000e-10</scf_error>
+      </scf_conv>
+    </convergence_info>
+    <total_energy>
+      <etot units="Hartree">-2.093467710</etot>
+      <eband units="Hartree">0.783945060</eband>
+      <ehart units="Hartree">0.271605490</ehart>
+      <vtxc units="Hartree">-0.894506170</vtxc>
+      <etxc units="Hartree">-0.894506170</etxc>
+      <ewald units="Hartree">-2.254450365</ewald>
+      <demet units="Hartree">-0.000061725</demet>
+    </total_energy>
+    <band_structure>
+      <lsda>false</lsda>
+      <num_of_electrons>3.000000</num_of_electrons>
+      <num_of_bands>6</num_of_bands>
+      <num_of_k_points>2</num_of_k_points>
+      <fermi_energy units="Hartree">0.2918664</fermi_energy>
+      <ks_energies>
+        <k_point weight="0.500000">0.000000 0.000000 0.000000</k_point>
+        <eigenvalues units="Hartree">-0.154320 0.123450 0.123450 0.123450 0.450000 0.650000</eigenvalues>
+        <occupations units="Hartree">2.000000 0.333333 0.333333 0.333333 0.000000 0.000000</occupations>
+      </ks_energies>
+      <ks_energies>
+        <k_point weight="0.500000">0.500000 0.500000 0.500000</k_point>
+        <eigenvalues units="Hartree">-0.054320 0.084320 0.291866 0.350000 0.480000 0.700000</eigenvalues>
+        <occupations units="Hartree">2.000000 0.900000 0.100000 0.000000 0.000000 0.000000</occupations>
+      </ks_energies>
+    </band_structure>
+  </output>
+</qes:espresso>

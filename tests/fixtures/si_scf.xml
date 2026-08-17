@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<qes:espresso xmlns:qes="http://www.quantum-espresso.org/ns/qes/qes-1.0"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              SCHEMA_VERSION="1.0.0">
+  <general_info>
+    <creator NAME="PWSCF" VERSION="7.2"/>
+    <job_title>silicon</job_title>
+  </general_info>
+  <parallel_info>
+    <nprocs>4</nprocs>
+    <nthreads>1</nthreads>
+  </parallel_info>
+  <input>
+    <control_variables>
+      <title>silicon</title>
+      <calculation>scf</calculation>
+      <restart_mode>from_scratch</restart_mode>
+      <prefix>silicon</prefix>
+      <outdir>./tmp</outdir>
+      <pseudo_dir>./pseudo</pseudo_dir>
+    </control_variables>
+    <atomic_species ntyp="1">
+      <species name="Si">
+        <mass>28.08600</mass>
+        <pseudo_file>Si.pbe-n-kjpaw_psl.1.0.0.UPF</pseudo_file>
+      </species>
+    </atomic_species>
+    <atomic_structure nat="2" alat="10.2000000000">
+      <atomic_positions>
+        <atom name="Si" index="1">0.0000000000 0.0000000000 0.0000000000</atom>
+        <atom name="Si" index="2">2.5500000000 2.5500000000 2.5500000000</atom>
+      </atomic_positions>
+      <cell>
+        <a1>0.0000000000 5.1000000000 5.1000000000</a1>
+        <a2>5.1000000000 0.0000000000 5.1000000000</a2>
+        <a3>5.1000000000 5.1000000000 0.0000000000</a3>
+      </cell>
+    </atomic_structure>
+    <basis>
+      <ecutwfc units="Hartree">15.000000</ecutwfc>
+      <ecutrho units="Hartree">120.000000</ecutrho>
+    </basis>
+    <electron_control>
+      <diagonalization>david</diagonalization>
+      <mixing_mode>plain</mixing_mode>
+      <mixing_beta>0.700000</mixing_beta>
+      <conv_thr>1.000000e-08</conv_thr>
+    </electron_control>
+    <k_points_ibz>
+      <nk>2</nk>
+      <k_point weight="0.250000">0.000000 0.000000 0.000000</k_point>
+      <k_point weight="0.750000">0.250000 0.250000 0.250000</k_point>
+    </k_points_ibz>
+  </input>
+  <output>
+    <convergence_info>
+      <scf_conv>
+        <n_scf_steps>8</n_scf_steps>
+        <scf_error>1.000000e-09</scf_error>
+      </scf_conv>
+    </convergence_info>
+    <total_energy>
+      <etot units="Hartree">-7.927172835</etot>
+      <eband units="Hartree">2.417283945</eband>
+      <ehart units="Hartree">0.561728390</ehart>
+      <vtxc units="Hartree">-2.422839450</vtxc>
+      <etxc units="Hartree">-2.422839450</etxc>
+      <ewald units="Hartree">-8.483344720</ewald>
+    </total_energy>
+    <band_structure>
+      <lsda>false</lsda>
+      <noncolin>false</noncolin>
+      <spinorbit>false</spinorbit>
+      <num_of_electrons>8.000000</num_of_electrons>
+      <num_of_atomic_wfc>8</num_of_atomic_wfc>
+      <num_of_bands>4</num_of_bands>
+      <num_of_k_points>2</num_of_k_points>
+      <highestOccupiedLevel units="Hartree">0.2283602</highestOccupiedLevel>
+      <lowestUnoccupiedLevel units="Hartree">0.2717255</lowestUnoccupiedLevel>
+      <ks_energies>
+        <k_point weight="0.250000">0.000000 0.000000 0.000000</k_point>
+        <eigenvalues units="Hartree">-0.215430 -0.054320 -0.054320 -0.054320</eigenvalues>
+        <occupations units="Hartree">2.000000 2.000000 2.000000 2.000000</occupations>
+      </ks_energies>
+      <ks_energies>
+        <k_point weight="0.750000">0.250000 0.250000 0.250000</k_point>
+        <eigenvalues units="Hartree">-0.185430 -0.014320 0.034320 0.228360</eigenvalues>
+        <occupations units="Hartree">2.000000 2.000000 2.000000 2.000000</occupations>
+      </ks_energies>
+    </band_structure>
+    <forces units="Hartree/Bohr">
+0.0000000000 0.0000000000 0.0000000000
+0.0000000000 0.0000000000 0.0000000000
+    </forces>
+    <stress units="Hartree/Bohr**3">
+0.0000000000 0.0000000000 0.0000000000
+0.0000000000 0.0000000000 0.0000000000
+0.0000000000 0.0000000000 0.0000000000
+    </stress>
+  </output>
+</qes:espresso>

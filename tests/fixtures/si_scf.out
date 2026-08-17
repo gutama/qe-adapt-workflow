@@ -1,0 +1,118 @@
+     Program PWSCF v.7.2 starts on 15Aug2024 at 10:23:45 
+
+     This program is part of the open-source Quantum ESPRESSO suite
+     for quantum simulation of materials; please cite
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 21 395502 (2009);
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 29 465901 (2017);
+         "P. Giannozzi et al., J. Chem. Phys. 152 154105 (2020);
+          URL http://www.quantum-espresso.org", 
+     in publications or presentations arising from this work. More details at
+     http://www.quantum-espresso.org/quote
+
+     Parallel version (MPI), running on     4 processors
+     Threads/MPI process:     1
+
+     MPI processes distributed on     1 nodes
+     236 MiB available memory on the printing node
+
+     Reading input from scf.in
+
+     atomic species   valence    mass     pseudopotential
+        Si             4.00    28.08600     Si( 1.00)
+
+     bravais-lattice index     =            2
+     lattice parameter (BOHR)  =      10.2000
+     unit-cell volume          =     265.3020 (a.u.)^3
+     number of atoms/cell      =            2
+     number of atomic types    =            1
+     number of electrons       =         8.00
+     number of Kohn-Sham states=            4
+     kinetic-energy cutoff     =      30.0000  Ry
+     charge-density cutoff     =     240.0000  Ry
+
+     number of k points=    10
+
+     mixing beta               =       0.7000
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-02,  avg # of iterations =  2.0
+
+     total energy              =     -15.82345678 Ry
+     estimated scf accuracy    <       0.12345678 Ry
+
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-03,  avg # of iterations =  2.5
+
+     total energy              =     -15.84345678 Ry
+     estimated scf accuracy    <       0.01234567 Ry
+
+     iteration #  3     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.23E-04,  avg # of iterations =  2.0
+
+     total energy              =     -15.85045678 Ry
+     estimated scf accuracy    <       0.00123456 Ry
+
+     iteration #  4     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.23E-05,  avg # of iterations =  2.0
+
+     total energy              =     -15.85345678 Ry
+     estimated scf accuracy    <       0.00012345 Ry
+
+     iteration #  5     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.23E-06,  avg # of iterations =  2.0
+
+     total energy              =     -15.85424567 Ry
+     estimated scf accuracy    <       0.00001234 Ry
+
+     iteration #  6     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.23E-07,  avg # of iterations =  2.0
+
+     total energy              =     -15.85433567 Ry
+     estimated scf accuracy    <       0.00000123 Ry
+
+     iteration #  7     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.23E-08,  avg # of iterations =  2.0
+
+     total energy              =     -15.85434467 Ry
+     estimated scf accuracy    <       0.00000012 Ry
+
+     iteration #  8     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.20E-09,  avg # of iterations =  2.0
+
+     total energy              =     -15.85434567 Ry
+     estimated scf accuracy    <       0.00000001 Ry
+
+     convergence has been achieved in      8 iterations
+
+!    total energy              =     -15.85434567 Ry
+     one-electron contribution =       4.83456789 Ry
+     hartree contribution      =       1.12345678 Ry
+     xc contribution           =      -4.84567890 Ry
+     ewald contribution        =     -16.96668944 Ry
+
+     highest occupied, lowest unoccupied level (ev):     6.2140    7.3940
+
+     Forces acting on atoms (cartesian axes, Ry/au):
+
+     atom    1 type  1   force =     0.00000000    0.00000000    0.00000000
+     atom    2 type  1   force =     0.00000000    0.00000000    0.00000000
+
+     Total force =     0.000000     Total SCF correction =     0.000001
+
+     PWSCF        :      0.42s CPU      0.54s WALL
+
+   This run was terminated on:  10:23:46  15Aug2024            
+
+=------------------------------------------------------------------------------=
+   JOB DONE.
+=------------------------------------------------------------------------------=

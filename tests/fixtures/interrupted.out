@@ -1,0 +1,58 @@
+     Program PWSCF v.7.2 starts on 15Aug2024 at 11:30:00 
+
+     This program is part of the open-source Quantum ESPRESSO suite
+     for quantum simulation of materials; please cite
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 21 395502 (2009);
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 29 465901 (2017);
+         "P. Giannozzi et al., J. Chem. Phys. 152 154105 (2020);
+          URL http://www.quantum-espresso.org", 
+     in publications or presentations arising from this work. More details at
+     http://www.quantum-espresso.org/quote
+
+     Parallel version (MPI), running on     4 processors
+     Threads/MPI process:     1
+
+     MPI processes distributed on     1 nodes
+     236 MiB available memory on the printing node
+
+     Reading input from interrupted.in
+
+     atomic species   valence    mass     pseudopotential
+        Si             4.00    28.08600     Si( 1.00)
+
+     bravais-lattice index     =            2
+     lattice parameter (BOHR)  =      10.2000
+     unit-cell volume          =     265.3020 (a.u.)^3
+     number of atoms/cell      =            2
+     number of atomic types    =            1
+     number of electrons       =         8.00
+     number of Kohn-Sham states=            4
+     kinetic-energy cutoff     =      30.0000  Ry
+     charge-density cutoff     =     240.0000  Ry
+
+     number of k points=    10
+
+     mixing beta               =       0.7000
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-02,  avg # of iterations =  2.0
+
+     total energy              =     -15.82345678 Ry
+     estimated scf accuracy    <       0.12345678 Ry
+
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-03,  avg # of iterations =  2.0
+
+     total energy              =     -15.84345678 Ry
+     estimated scf accuracy    <       0.01234567 Ry
+
+     iteration #  3     ecut=    30.00 Ry     beta= 0.70
+     Davidson diagonalization with overlap
+     ethr =  1.00E-04,  avg # of iterations =  2.0
+
+     total energy              =     -15.85045678 Ry
+     estimated scf accuracy    <       0.00123456 Ry
