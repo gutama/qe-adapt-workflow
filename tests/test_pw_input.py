@@ -656,6 +656,65 @@ class TestModification(unittest.TestCase):
         self.assertEqual(reparsed.atomic_species[0].symbol, "Ge")
         self.assertEqual(reparsed.atomic_positions[0].symbol, "Ge")
 
+class TestDoubleQuotedValues(unittest.TestCase):
+    """Fortran accepts " as well as ' as a string delimiter, and QE emits both.
+
+    A '/' inside a double-quoted value previously terminated the namelist early,
+    silently dropping every key after it.
+    """
+
+    TEXT = (
+        "&CONTROL\n"
+        '  calculation = "scf"\n'
+        '  outdir = "./tmp"\n'
+        '  pseudo_dir = "/opt/qe/pseudo"\n'
+        '  prefix = "si"\n'
+        "/\n"
+        "&SYSTEM\n"
+        "  ibrav = 2\n"
+        "  nat = 2\n"
+        "  ntyp = 1\n"
+        "  ecutwfc = 30.0\n"
+        "/\n"
+        "&ELECTRONS\n"
+        "  conv_thr = 1.0d-8\n"
+        "/\n"
+    )
+
+    def setUp(self):
+        self.inp = parse_pw_input(self.TEXT)
+
+    def test_value_containing_slash_is_not_truncated(self):
+        self.assertEqual(self.inp.get_param("CONTROL", "outdir"), "./tmp")
+        self.assertEqual(self.inp.get_param("CONTROL", "pseudo_dir"), "/opt/qe/pseudo")
+
+    def test_keys_after_a_slash_bearing_value_survive(self):
+        self.assertEqual(self.inp.get_param("CONTROL", "prefix"), "si")
+        self.assertEqual(self.inp.get_param("CONTROL", "calculation"), "scf")
+
+    def test_later_namelists_still_parse(self):
+        self.assertEqual(self.inp.get_param("SYSTEM", "ecutwfc"), 30.0)
+        self.assertEqual(self.inp.get_param("ELECTRONS", "conv_thr"), 1.0e-8)
+
+    def test_roundtrip_preserves_paths(self):
+        reparsed = parse_pw_input(write_pw_input(self.inp))
+        self.assertEqual(reparsed.get_param("CONTROL", "outdir"), "./tmp")
+        self.assertEqual(reparsed.get_param("CONTROL", "prefix"), "si")
+
+    def test_comment_stripping_respects_double_quotes(self):
+        inp = parse_pw_input('&CONTROL\n  outdir = "./a!b"  ! trailing comment\n/\n')
+        self.assertEqual(inp.get_param("CONTROL", "outdir"), "./a!b")
+
+    def test_single_quoted_values_still_work(self):
+        inp = parse_pw_input("&CONTROL\n  outdir = './tmp'\n  prefix = 'si'\n/\n")
+        self.assertEqual(inp.get_param("CONTROL", "outdir"), "./tmp")
+        self.assertEqual(inp.get_param("CONTROL", "prefix"), "si")
+
+    def test_apostrophe_inside_double_quoted_value(self):
+        inp = parse_pw_input("&CONTROL\n  title = \"it's fine\"\n  prefix = 'si'\n/\n")
+        self.assertEqual(inp.get_param("CONTROL", "title"), "it's fine")
+        self.assertEqual(inp.get_param("CONTROL", "prefix"), "si")
+
 
 if __name__ == "__main__":
     unittest.main()

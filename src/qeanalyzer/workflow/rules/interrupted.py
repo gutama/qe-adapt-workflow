@@ -22,7 +22,14 @@ class InterruptedRecoveryPolicy(Policy):
     description: str = "Restart interrupted calculation from checkpointed save directory"
 
     def can_handle(self, result: QERunResult, prev_input: PWInput | None = None) -> bool:
-        """Check if calculation was interrupted before normal completion."""
+        """Check if calculation was interrupted before normal completion.
+
+        A hard QE error (``exit_status == 'error'``) also leaves the run
+        incomplete, but restarting it unchanged just reproduces the failure.
+        Those are excluded so the corrective policies can claim them instead.
+        """
+        if result.status.exit_status == "error":
+            return False
         return (
             not result.status.completed
             or result.status.exit_status == "interrupted"

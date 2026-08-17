@@ -145,23 +145,36 @@ class PWInput:
 # -- Value helpers -----------------------------------------------------------
 
 def _strip_comment(line: str) -> str:
-    """Remove a trailing ``!`` comment, respecting single-quoted strings."""
-    in_quote = False
+    """Remove a trailing ``!`` comment, respecting quoted strings.
+
+    Fortran accepts both ``'`` and ``"`` as string delimiters, and QE emits
+    either; a quote of one kind inside a string delimited by the other is
+    literal text, so only the opening delimiter closes the string.
+    """
+    quote: str | None = None
     for i, ch in enumerate(line):
-        if ch == "'":
-            in_quote = not in_quote
-        elif ch == "!" and not in_quote:
+        if quote is None and ch in ("'", '"'):
+            quote = ch
+        elif quote is not None and ch == quote:
+            quote = None
+        elif ch == "!" and quote is None:
             return line[:i]
     return line
 
 
 def _find_namelist_terminator(line: str) -> int | None:
-    """Return index of the ``/`` that ends a namelist, or *None*."""
-    in_quote = False
+    """Return index of the ``/`` that ends a namelist, or *None*.
+
+    A ``/`` inside a quoted value (e.g. ``outdir = "./tmp"``) does not
+    terminate the namelist.
+    """
+    quote: str | None = None
     for i, ch in enumerate(line):
-        if ch == "'":
-            in_quote = not in_quote
-        elif ch == "/" and not in_quote:
+        if quote is None and ch in ("'", '"'):
+            quote = ch
+        elif quote is not None and ch == quote:
+            quote = None
+        elif ch == "/" and quote is None:
             return i
     return None
 
@@ -226,20 +239,23 @@ def _format_value(value: Any) -> str:
 def _parse_namelist_body(body: str) -> dict[str, Any]:
     """Parse the body text of a Fortran namelist into a dict.
 
-    Entries may be separated by commas or newlines.  Commas inside
-    single-quoted strings are handled correctly.
+    Entries may be separated by commas or newlines.  Commas inside single- or
+    double-quoted strings are handled correctly.
     """
     result: dict[str, Any] = {}
 
     # Split into entries on commas/newlines, respecting quotes.
     entries: list[str] = []
     current: list[str] = []
-    in_quote = False
+    quote: str | None = None
     for ch in body:
-        if ch == "'":
-            in_quote = not in_quote
+        if quote is None and ch in ("'", '"'):
+            quote = ch
             current.append(ch)
-        elif ch in (",", "\n") and not in_quote:
+        elif quote is not None and ch == quote:
+            quote = None
+            current.append(ch)
+        elif ch in (",", "\n") and quote is None:
             entries.append("".join(current))
             current = []
         else:
