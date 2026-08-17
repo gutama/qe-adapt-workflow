@@ -10,6 +10,11 @@ from qeanalyzer.quantum.active_space import (
     create_active_space_selector,
     select_active_space,
 )
+from qeanalyzer.quantum.hamiltonian import (
+    MaterialHamiltonian,
+    build_active_space_hamiltonian,
+    build_hubbard_hamiltonian,
+)
 
 __all__ = [
     "ActiveSpace",
@@ -17,7 +22,10 @@ __all__ = [
     "BandIndexSelector",
     "EnergyWindowSelector",
     "ExplicitOrbitalSelector",
+    "MaterialHamiltonian",
     "OccupationSelector",
+    "build_active_space_hamiltonian",
+    "build_hubbard_hamiltonian",
     "create_active_space_selector",
     "select_active_space",
 ]
