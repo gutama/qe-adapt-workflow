@@ -23,6 +23,13 @@ from qeanalyzer.quantum.fcidump import (
     read_fcidump,
     write_fcidump,
 )
+from qeanalyzer.quantum.feedback import (
+    ActiveSpaceFeedbackPolicy,
+    HubbardUFeedbackPolicy,
+    OccupationFeedbackPolicy,
+    QuantumFeedbackPolicy,
+    apply_quantum_feedback,
+)
 from qeanalyzer.quantum.hamiltonian import (
     MaterialHamiltonian,
     build_active_space_hamiltonian,
@@ -32,15 +39,20 @@ from qeanalyzer.quantum.hamiltonian import (
 __all__ = [
     "ADAPTVQESolver",
     "ActiveSpace",
+    "ActiveSpaceFeedbackPolicy",
     "ActiveSpaceSelector",
     "BandIndexSelector",
     "EnergyWindowSelector",
     "ExactDiagonalizationSolver",
     "ExplicitOrbitalSelector",
+    "HubbardUFeedbackPolicy",
     "MaterialHamiltonian",
+    "OccupationFeedbackPolicy",
     "OccupationSelector",
+    "QuantumFeedbackPolicy",
     "QuantumRunResult",
     "QuantumSolver",
+    "apply_quantum_feedback",
     "build_active_space_hamiltonian",
     "build_hubbard_hamiltonian",
     "create_active_space_selector",
