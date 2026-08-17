@@ -11,6 +11,7 @@ from .io import PWInput, PWOutput, QEXMLOutput, read_pw_input, read_pw_output, r
 from .models import build_run_result
 from .plotting import plot_relaxation_convergence, plot_scf_convergence
 from .report import dump_result_json, generate_text_report, save_result_json, save_text_report
+from .workflow import WorkflowLedger, default_registry, plan_next_calculation
 
 
 def _detect_and_load_sources(paths: list[str]) -> tuple[PWInput | None, PWOutput | None, QEXMLOutput | None, str | None]:
@@ -153,6 +154,97 @@ def cmd_plot(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_next(args: argparse.Namespace) -> int:
+    """Handle `qeanalyzer next` subcommand."""
+    pw_in, pw_out, qe_xml, input_text = _detect_and_load_sources(args.paths)
+
+    if not pw_in and not pw_out and not qe_xml:
+        sys.stderr.write("Error: No valid Quantum ESPRESSO input (.in), output (.out), or XML (.xml) files found.\n")
+        return 1
+
+    result = build_run_result(
+        pw_in=pw_in,
+        pw_out=pw_out,
+        qe_xml=qe_xml,
+        run_id=args.run_id,
+        parent_run=args.parent_run,
+        input_text=input_text,
+    )
+
+    ledger = None
+    if args.ledger:
+        l_path = Path(args.ledger)
+        if l_path.exists():
+            ledger = WorkflowLedger.load_json(l_path)
+        else:
+            ledger = WorkflowLedger(workflow_id=args.workflow_id or "workflow_001")
+
+    decision = plan_next_calculation(
+        result=result,
+        prev_input=pw_in,
+        policy_name=args.policy,
+        output_dir=args.output_dir,
+        ledger=ledger,
+        next_run_id=args.next_run_id,
+    )
+
+    if ledger and args.ledger:
+        ledger.save_json(args.ledger)
+
+    sys.stdout.write(f"Decision : {decision.decision_type}\n")
+    sys.stdout.write(f"Policy   : {decision.policy_name} (v{decision.policy_version})\n")
+    sys.stdout.write(f"Target   : {decision.target_calculation}\n")
+    sys.stdout.write(f"Restart  : {decision.is_restart}\n")
+    sys.stdout.write(f"Reason   : {decision.reason}\n")
+    if args.output_dir:
+        sys.stdout.write(f"Staged   : {args.output_dir}/pw.in\n")
+    elif decision.next_input_text:
+        sys.stdout.write("\n--- Generated pw.in ---\n")
+        sys.stdout.write(decision.next_input_text)
+
+    return 0
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    """Handle `qeanalyzer history` subcommand."""
+    l_path = Path(args.ledger)
+    if not l_path.exists():
+        sys.stderr.write(f"Error: Ledger file not found at '{args.ledger}'\n")
+        return 1
+
+    ledger = WorkflowLedger.load_json(l_path)
+    sys.stdout.write(f"Workflow ID : {ledger.workflow_id}\n")
+    sys.stdout.write(f"Total Runs  : {len(ledger.runs)}\n")
+    sys.stdout.write("=" * 70 + "\n")
+    sys.stdout.write(f"{'Run ID':<15} {'Calc':<10} {'Parent':<15} {'Status':<12} {'Policy':<15}\n")
+    sys.stdout.write("-" * 70 + "\n")
+    for r in ledger.runs:
+        parent = r.parent_run or "-"
+        policy = r.policy_applied or "-"
+        sys.stdout.write(f"{r.run_id:<15} {r.calculation:<10} {parent:<15} {r.status:<12} {policy:<15}\n")
+
+    return 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Handle `qeanalyzer validate` subcommand."""
+    l_path = Path(args.ledger)
+    if not l_path.exists():
+        sys.stderr.write(f"Error: Ledger file not found at '{args.ledger}'\n")
+        return 1
+
+    ledger = WorkflowLedger.load_json(l_path)
+    errors = ledger.validate()
+    if errors:
+        sys.stderr.write(f"Validation FAILED ({len(errors)} errors found):\n")
+        for err in errors:
+            sys.stderr.write(f"  - {err}\n")
+        return 1
+
+    sys.stdout.write(f"Workflow ledger '{args.ledger}' is VALID ({len(ledger.runs)} runs, clean DAG).\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build root CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -265,6 +357,69 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional parent run identifier in the workflow DAG",
     )
 
+    # next subcommand
+    next_parser = subparsers.add_parser(
+        "next",
+        help="Generate deterministic next-step input or apply automated recovery",
+    )
+    next_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Paths to current calculation files (pw.in, pw.out, data-file-schema.xml) or directory",
+    )
+    next_parser.add_argument(
+        "-o", "--output-dir",
+        help="Destination directory to stage the next calculation",
+    )
+    next_parser.add_argument(
+        "--policy",
+        help="Explicit policy name to execute (e.g. 'scf_to_nscf', 'relax_to_scf')",
+    )
+    next_parser.add_argument(
+        "--ledger",
+        help="Path to workflow ledger JSON file (e.g. workflow.json)",
+    )
+    next_parser.add_argument(
+        "--workflow-id",
+        help="Workflow identifier for ledger initialization",
+    )
+    next_parser.add_argument(
+        "--run-id",
+        help="Current calculation run identifier",
+    )
+    next_parser.add_argument(
+        "--next-run-id",
+        help="Identifier for the new derived calculation run",
+    )
+    next_parser.add_argument(
+        "--parent-run",
+        help="Parent run identifier",
+    )
+
+    # history subcommand
+    hist_parser = subparsers.add_parser(
+        "history",
+        help="Display workflow execution history from ledger",
+    )
+    hist_parser.add_argument(
+        "ledger",
+        nargs="?",
+        default="workflow.json",
+        help="Path to workflow.json ledger file (default: 'workflow.json')",
+    )
+
+    # validate subcommand
+    val_parser = subparsers.add_parser(
+        "validate",
+        help="Validate workflow ledger integrity and DAG lineage",
+    )
+    val_parser.add_argument(
+        "ledger",
+        nargs="?",
+        default="workflow.json",
+        help="Path to workflow.json ledger file (default: 'workflow.json')",
+    )
+
     return parser
 
 
@@ -279,6 +434,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_report(args)
     if args.command == "plot":
         return cmd_plot(args)
+    if args.command == "next":
+        return cmd_next(args)
+    if args.command == "history":
+        return cmd_history(args)
+    if args.command == "validate":
+        return cmd_validate(args)
 
     parser.print_help()
     return 0

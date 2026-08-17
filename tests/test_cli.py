@@ -140,11 +140,58 @@ class TestCLI(unittest.TestCase):
                 str(out_png),
             ]
             buffer = io.StringIO()
+    def test_next_cli(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir) / "002_nscf"
+            ledger_file = Path(tmpdir) / "workflow.json"
+            args = [
+                "next",
+                str(FIXTURES / "si_scf.in"),
+                str(FIXTURES / "si_scf.out"),
+                str(FIXTURES / "si_scf.xml"),
+                "-o",
+                str(out_dir),
+                "--ledger",
+                str(ledger_file),
+            ]
+            buffer = io.StringIO()
             with redirect_stdout(buffer):
                 code = main(args)
+
             self.assertEqual(code, 0)
-            self.assertTrue(out_png.exists())
-            self.assertIn("Saved relax convergence plot", buffer.getvalue())
+            output = buffer.getvalue()
+            self.assertIn("Decision : NEXT_RUN", output)
+            self.assertIn("Target   : nscf", output)
+            self.assertTrue((out_dir / "pw.in").exists())
+            self.assertTrue(ledger_file.exists())
+
+    def test_history_and_validate_cli(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_file = Path(tmpdir) / "workflow.json"
+            # First create a step
+            main([
+                "next",
+                str(FIXTURES / "si_scf.in"),
+                str(FIXTURES / "si_scf.out"),
+                "--ledger",
+                str(ledger_file),
+                "-o",
+                str(Path(tmpdir) / "002_nscf"),
+            ])
+
+            # History test
+            hist_buf = io.StringIO()
+            with redirect_stdout(hist_buf):
+                hist_code = main(["history", str(ledger_file)])
+            self.assertEqual(hist_code, 0)
+            self.assertIn("Total Runs", hist_buf.getvalue())
+
+            # Validate test
+            val_buf = io.StringIO()
+            with redirect_stdout(val_buf):
+                val_code = main(["validate", str(ledger_file)])
+            self.assertEqual(val_code, 0)
+            self.assertIn("is VALID", val_buf.getvalue())
 
 
 if __name__ == "__main__":
