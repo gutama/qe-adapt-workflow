@@ -1,174 +1,137 @@
-"""Canonical MaterialHamiltonian representation for downfolded and active-space electronic models."""
+"""Canonical finite active-space Hamiltonians and explicitly labelled model builders."""
 
 from __future__ import annotations
 
-import math
+import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Sequence
 
 from qeanalyzer.models import QEElectronicState, QERunResult
 from qeanalyzer.quantum.active_space import ActiveSpace
+from qeanalyzer.quantum.units import normalize_energy_unit
 
 
 @dataclass
 class MaterialHamiltonian:
-    """Canonical representation of an electronic many-body Hamiltonian.
+    """Finite restricted spatial-orbital Hamiltonian.
 
-    Supports both explicit 1-body (h1) and 2-body (h2) electronic integral tensors
-    as well as parameterized tight-binding / Hubbard (t, U, V, J) lattice models.
+    The integral convention is fixed throughout qeanalyzer and at FCIDUMP:
 
-    Convention:
-        H = E_const
-          + sum_{pq, sigma} h1_{pq} c_{p,sigma}^dagger c_{q,sigma}
-          + 0.5 * sum_{pqrs, sigma, tau} h2_{pqrs} c_{p,sigma}^dagger c_{r,tau}^dagger c_{s,tau} c_{q,sigma}
+    ``h2[p][q][r][s] == (pq|rs)`` (chemist notation), and
 
-    In chemists' notation:
-        h2_{pqrs} = (pr | qs) = int phi_p^*(r1) phi_r^*(r2) 1/|r1-r2| phi_q(r1) phi_s(r2) dr1 dr2
+    ``H2 = 1/2 sum_pqrs sum_st (pq|rs)
+          a†_(p,s) a†_(r,t) a_(s,t) a_(q,s)``.
+
+    Arrays are real.  General complex/spinor/unrestricted Hamiltonians require a
+    different model type and are intentionally rejected by the restricted
+    adapters rather than silently coerced.
     """
 
-    n_orbitals: int  # Number of spatial orbitals
-    n_electrons: float  # Number of electrons in the active space
-    constant: float = 0.0  # Constant shift (e.g. core energy + nuclear repulsion) in eV / Ry
-    spin: int = 0  # 2S (multiplicity - 1)
-    energy_unit: str = "eV"  # "eV", "Ry", or "Hartree"
-
-    # 1-body integrals: shape (n_orbitals, n_orbitals)
+    n_orbitals: int
+    n_electrons: float
+    constant: float = 0.0
+    spin: int = 0  # MS2 = N_alpha - N_beta
+    energy_unit: str = "eV"
     h1: list[list[float]] = field(default_factory=list)
-
-    # 2-body integrals: shape (n_orbitals, n_orbitals, n_orbitals, n_orbitals)
     h2: list[list[list[list[float]]]] = field(default_factory=list)
-
-    # Optional model parameters
     hopping_t: dict[tuple[int, int], float] = field(default_factory=dict)
     onsite_u: list[float] = field(default_factory=list)
     intersite_v: dict[tuple[int, int], float] = field(default_factory=dict)
     exchange_j: dict[tuple[int, int], float] = field(default_factory=dict)
-
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Initialize empty tensors if not explicitly provided."""
         if self.n_orbitals <= 0:
-            raise ValueError(f"n_orbitals must be > 0, got {self.n_orbitals}")
-
-        # Initialize h1 if empty
+            raise ValueError("n_orbitals must be positive")
+        self.energy_unit = normalize_energy_unit(self.energy_unit)
+        n = self.n_orbitals
         if not self.h1:
-            self.h1 = [[0.0 for _ in range(self.n_orbitals)] for _ in range(self.n_orbitals)]
-
-        # Initialize h2 if empty
+            self.h1 = [[0.0] * n for _ in range(n)]
         if not self.h2:
-            self.h2 = [
-                [
-                    [
-                        [0.0 for _ in range(self.n_orbitals)]
-                        for _ in range(self.n_orbitals)
-                    ]
-                    for _ in range(self.n_orbitals)
-                ]
-                for _ in range(self.n_orbitals)
-            ]
-
-        # Initialize onsite_u list if empty
+            self.h2 = [[[[0.0 for _ in range(n)] for _ in range(n)] for _ in range(n)] for _ in range(n)]
+        if len(self.h1) != n or any(len(row) != n for row in self.h1):
+            raise ValueError("h1 must have shape (n_orbitals, n_orbitals)")
+        if len(self.h2) != n:
+            raise ValueError("h2 must have shape (n_orbitals,)*4")
+        for a in self.h2:
+            if len(a) != n:
+                raise ValueError("h2 must have shape (n_orbitals,)*4")
+            for b in a:
+                if len(b) != n or any(len(c) != n for c in b):
+                    raise ValueError("h2 must have shape (n_orbitals,)*4")
         if not self.onsite_u:
-            self.onsite_u = [0.0] * self.n_orbitals
+            self.onsite_u = [0.0] * n
 
     @property
     def n_spin_orbitals(self) -> int:
-        """Total number of spin orbitals (2 * n_spatial_orbitals)."""
         return 2 * self.n_orbitals
 
     def is_hermitian(self, tolerance: float = 1e-7) -> bool:
-        """Check Hermiticity of 1-body matrix and symmetry of 2-body tensor."""
-        norb = self.n_orbitals
-
-        # Check 1-body Hermiticity: h1[p][q] == h1[q][p]
-        for p in range(norb):
-            for q in range(norb):
+        n = self.n_orbitals
+        for p in range(n):
+            for q in range(n):
                 if abs(self.h1[p][q] - self.h1[q][p]) > tolerance:
                     return False
-
-        # Check 2-body 8-fold real symmetry: (pq|rs) == (qp|rs) == (pq|sr) == (rs|pq)
-        for p in range(norb):
-            for q in range(norb):
-                for r in range(norb):
-                    for s in range(norb):
-                        val = self.h2[p][q][r][s]
-                        if abs(val - self.h2[q][p][r][s]) > tolerance:
+        # Real spatial ERIs: (pq|rs)=(qp|rs)=(pq|sr)=(rs|pq)
+        for p in range(n):
+            for q in range(n):
+                for r in range(n):
+                    for s in range(n):
+                        value = self.h2[p][q][r][s]
+                        if abs(value - self.h2[q][p][r][s]) > tolerance:
                             return False
-                        if abs(val - self.h2[p][q][s][r]) > tolerance:
+                        if abs(value - self.h2[p][q][s][r]) > tolerance:
                             return False
-                        if abs(val - self.h2[r][s][p][q]) > tolerance:
+                        if abs(value - self.h2[r][s][p][q]) > tolerance:
                             return False
-
         return True
 
     def count_nonzero_integrals(self, tolerance: float = 1e-9) -> tuple[int, int]:
-        """Return counts of non-zero elements in (h1, h2)."""
-        norb = self.n_orbitals
-        n1 = sum(1 for p in range(norb) for q in range(norb) if abs(self.h1[p][q]) > tolerance)
-        n2 = sum(
-            1 for p in range(norb) for q in range(norb) for r in range(norb) for s in range(norb)
-            if abs(self.h2[p][q][r][s]) > tolerance
+        n = self.n_orbitals
+        one = sum(abs(self.h1[p][q]) > tolerance for p in range(n) for q in range(n))
+        two = sum(
+            abs(self.h2[p][q][r][s]) > tolerance
+            for p in range(n) for q in range(n) for r in range(n) for s in range(n)
         )
-        return n1, n2
+        return int(one), int(two)
 
     def to_spin_orbital_integrals(self) -> tuple[list[list[float]], list[list[list[list[float]]]]]:
-        """Convert spatial integrals to spin-orbital basis (alpha: 2p, beta: 2p+1).
+        """Return h1 and antisymmetrized two-electron spin-orbital tensors.
 
-        Returns
-        -------
-        h1_spin : 2D list of shape (2*norb, 2*norb)
-        h2_spin : 4D list of shape (2*norb, 2*norb, 2*norb, 2*norb)
-            In physicists' anti-symmetrized convention: <pr||qs> = <pr|qs> - <pr|sq>
+        The two-body return uses indices ``[P][R][Q][S]`` for
+        ``<P R || Q S>`` and interleaved spin orbitals ``2*p=alpha``,
+        ``2*p+1=beta``.  This helper is kept for compatibility; the canonical
+        stored tensor remains spatial chemist ``(pq|rs)``.
         """
-        n_so = self.n_spin_orbitals
-        norb = self.n_orbitals
-
-        h1_so = [[0.0 for _ in range(n_so)] for _ in range(n_so)]
-        h2_so = [[[[0.0 for _ in range(n_so)] for _ in range(n_so)] for _ in range(n_so)] for _ in range(n_so)]
-
-        # 1-body spin conversion: delta_{sigma, sigma'} h1[p, q]
-        for p in range(norb):
-            for q in range(norb):
-                val = self.h1[p][q]
-                h1_so[2 * p][2 * q] = val          # alpha-alpha
-                h1_so[2 * p + 1][2 * q + 1] = val  # beta-beta
-
-        # 2-body spin conversion in anti-symmetrized physicists' notation <pr||qs>
-        # <p_s1, r_s2 | q_s1, s_s2> = (pq|rs)
-        for p in range(norb):
-            for q in range(norb):
-                for r in range(norb):
-                    for s in range(norb):
-                        chem_val = self.h2[p][q][r][s]  # (pq|rs)
-                        if abs(chem_val) < 1e-12:
+        n = self.n_orbitals
+        nso = 2 * n
+        one = [[0.0 for _ in range(nso)] for _ in range(nso)]
+        two = [[[[0.0 for _ in range(nso)] for _ in range(nso)] for _ in range(nso)] for _ in range(nso)]
+        for p in range(n):
+            for q in range(n):
+                for spin in (0, 1):
+                    one[2*p+spin][2*q+spin] = self.h1[p][q]
+        for p in range(n):
+            for q in range(n):
+                for r in range(n):
+                    for s in range(n):
+                        value = self.h2[p][q][r][s]
+                        if abs(value) <= 1e-15:
                             continue
-
-                        # alpha-alpha / beta-beta pairs
-                        for s1 in (0, 1):
-                            for s2 in (0, 1):
-                                p_idx = 2 * p + s1
-                                r_idx = 2 * r + s2
-                                q_idx = 2 * q + s1
-                                s_idx = 2 * s + s2
-
-                                # Direct term: <p_idx, r_idx | q_idx, s_idx>
-                                h2_so[p_idx][r_idx][q_idx][s_idx] += chem_val
-
-                                # Exchange term if same spin: - <p_idx, r_idx | s_idx, q_idx>
-                                if s1 == s2:
-                                    h2_so[p_idx][r_idx][s_idx][q_idx] -= chem_val
-
-        return h1_so, h2_so
+                        for sigma in (0, 1):
+                            for tau in (0, 1):
+                                P, R = 2*p+sigma, 2*r+tau
+                                Q, S = 2*q+sigma, 2*s+tau
+                                two[P][R][Q][S] += value
+                                if sigma == tau:
+                                    two[P][R][S][Q] -= value
+        return one, two
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize MaterialHamiltonian to dictionary."""
-        # Convert tuple keys to str for JSON compatibility
-        hopping_dict = {f"{k[0]},{k[1]}": v for k, v in self.hopping_t.items()}
-        intersite_dict = {f"{k[0]},{k[1]}": v for k, v in self.intersite_v.items()}
-        exchange_dict = {f"{k[0]},{k[1]}": v for k, v in self.exchange_j.items()}
-
+        def keyed(d: dict[tuple[int, int], float]) -> dict[str, float]:
+            return {f"{i},{j}": v for (i, j), v in d.items()}
         return {
+            "integral_convention": "chemist_(pq|rs)",
             "n_orbitals": self.n_orbitals,
             "n_spin_orbitals": self.n_spin_orbitals,
             "n_electrons": self.n_electrons,
@@ -177,73 +140,79 @@ class MaterialHamiltonian:
             "energy_unit": self.energy_unit,
             "h1": self.h1,
             "h2": self.h2,
-            "hopping_t": hopping_dict,
+            "hopping_t": keyed(self.hopping_t),
             "onsite_u": self.onsite_u,
-            "intersite_v": intersite_dict,
-            "exchange_j": exchange_dict,
+            "intersite_v": keyed(self.intersite_v),
+            "exchange_j": keyed(self.exchange_j),
             "metadata": self.metadata,
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> MaterialHamiltonian:
-        """Construct MaterialHamiltonian from dictionary."""
-        hopping_t = {}
-        for k_str, val in data.get("hopping_t", {}).items():
-            p, q = map(int, k_str.split(","))
-            hopping_t[(p, q)] = float(val)
-
-        intersite_v = {}
-        for k_str, val in data.get("intersite_v", {}).items():
-            p, q = map(int, k_str.split(","))
-            intersite_v[(p, q)] = float(val)
-
-        exchange_j = {}
-        for k_str, val in data.get("exchange_j", {}).items():
-            p, q = map(int, k_str.split(","))
-            exchange_j[(p, q)] = float(val)
-
+    def from_dict(cls, data: dict[str, Any]) -> "MaterialHamiltonian":
+        convention = data.get("integral_convention", "chemist_(pq|rs)")
+        if convention != "chemist_(pq|rs)":
+            raise ValueError(f"Unsupported integral convention {convention!r}")
+        def unkey(d: dict[str, float]) -> dict[tuple[int, int], float]:
+            return {tuple(map(int, key.split(","))): float(value) for key, value in d.items()}
         return cls(
-            n_orbitals=data["n_orbitals"],
-            n_electrons=data.get("n_electrons", 0.0),
-            constant=data.get("constant", 0.0),
-            spin=data.get("spin", 0),
+            n_orbitals=int(data["n_orbitals"]),
+            n_electrons=float(data.get("n_electrons", 0.0)),
+            constant=float(data.get("constant", 0.0)),
+            spin=int(data.get("spin", 0)),
             energy_unit=data.get("energy_unit", "eV"),
             h1=data.get("h1", []),
             h2=data.get("h2", []),
-            hopping_t=hopping_t,
+            hopping_t=unkey(data.get("hopping_t", {})),
             onsite_u=data.get("onsite_u", []),
-            intersite_v=intersite_v,
-            exchange_j=exchange_j,
+            intersite_v=unkey(data.get("intersite_v", {})),
+            exchange_j=unkey(data.get("exchange_j", {})),
             metadata=data.get("metadata", {}),
         )
 
     def summary(self) -> str:
-        """Human-readable overview of Hamiltonian parameters and size."""
-        n1, n2 = self.count_nonzero_integrals()
-        lines = [
+        one, two = self.count_nonzero_integrals()
+        return "\n".join([
             "MaterialHamiltonian Summary",
             "=" * 40,
             f"Spatial Orbitals  : {self.n_orbitals}",
             f"Spin Orbitals     : {self.n_spin_orbitals}",
-            f"Active Electrons  : {self.n_electrons:.1f}",
-            f"Constant Energy   : {self.constant:.6f} {self.energy_unit}",
-            f"1-Body Integrals  : {n1} non-zero elements",
-            f"2-Body Integrals  : {n2} non-zero elements",
+            f"Active Electrons  : {self.n_electrons:.8g}",
+            f"Energy Unit       : {self.energy_unit}",
+            f"Integral Convention: (pq|rs)",
+            f"Constant Energy   : {self.constant:.8g} {self.energy_unit}",
+            f"1-Body Integrals  : {one} non-zero elements",
+            f"2-Body Integrals  : {two} non-zero elements",
             f"Hermitian Valid   : {self.is_hermitian()}",
-        ]
-        if any(abs(u) > 1e-6 for u in self.onsite_u):
-            u_str = ", ".join(f"{u:.2f}" for u in self.onsite_u[:4])
-            if len(self.onsite_u) > 4:
-                u_str += ", ..."
-            lines.append(f"Onsite Hubbard U  : [{u_str}] {self.energy_unit}")
-        if self.hopping_t:
-            lines.append(f"Hopping Terms (t) : {len(self.hopping_t)} couplings")
-        return "\n".join(lines)
+            f"Model Kind        : {self.metadata.get('model_kind', self.metadata.get('model_type', 'unspecified'))}",
+        ])
 
 
-# -----------------------------------------------------------------------------
-# Factory & Model Builders
-# -----------------------------------------------------------------------------
+def build_integral_hamiltonian(
+    h1: Sequence[Sequence[float]],
+    h2: Sequence[Sequence[Sequence[Sequence[float]]]],
+    *,
+    n_electrons: float,
+    constant: float = 0.0,
+    spin: int = 0,
+    energy_unit: str = "Hartree",
+    metadata: dict[str, Any] | None = None,
+) -> MaterialHamiltonian:
+    """Construct the physical finite-Hamiltonian interchange object from explicit integrals."""
+    n = len(h1)
+    ham = MaterialHamiltonian(
+        n_orbitals=n,
+        n_electrons=n_electrons,
+        constant=constant,
+        spin=spin,
+        energy_unit=energy_unit,
+        h1=[[float(v) for v in row] for row in h1],
+        h2=[[[[float(v) for v in row4] for row4 in row3] for row3 in row2] for row2 in h2],
+        metadata={"model_kind": "explicit_integrals", **(metadata or {})},
+    )
+    if not ham.is_hermitian():
+        raise ValueError("explicit integral Hamiltonian violates real restricted integral symmetries")
+    return ham
+
 
 def build_hubbard_hamiltonian(
     n_orbitals: int,
@@ -254,173 +223,122 @@ def build_hubbard_hamiltonian(
     constant: float = 0.0,
     energy_unit: str = "eV",
 ) -> MaterialHamiltonian:
-    """Build a tight-binding Hubbard model MaterialHamiltonian with full 1-body and 2-body integrals.
+    """Build a parameterized restricted Hubbard/extended-Hubbard model."""
+    n = n_orbitals
+    h1 = [[0.0] * n for _ in range(n)]
+    h2 = [[[[0.0 for _ in range(n)] for _ in range(n)] for _ in range(n)] for _ in range(n)]
+    hop: dict[tuple[int, int], float] = {}
+    if isinstance(hopping_t, dict):
+        hop = {(int(i), int(j)): float(v) for (i, j), v in hopping_t.items()}
+    elif isinstance(hopping_t, list):
+        if len(hopping_t) != n or any(len(row) != n for row in hopping_t):
+            raise ValueError("hopping_t matrix must be square with n_orbitals rows")
+        hop = {(i, j): float(hopping_t[i][j]) for i in range(n) for j in range(n) if abs(hopping_t[i][j]) > 1e-12}
+    for (i, j), value in hop.items():
+        if not (0 <= i < n and 0 <= j < n):
+            raise IndexError("hopping index outside orbital range")
+        h1[i][j] = value if i == j else -value
+    if any(abs(h1[i][j] - h1[j][i]) > 1e-12 for i in range(n) for j in range(n)):
+        raise ValueError("hopping_t must define a Hermitian/symmetric real hopping matrix")
 
-    Parameters
-    ----------
-    n_orbitals : int
-        Number of spatial sites / orbitals.
-    n_electrons : float
-        Total number of electrons.
-    hopping_t : dict or 2D list, optional
-        Hopping amplitudes t_ij between sites, e.g. ``{(0, 1): 1.0, (1, 0): 1.0}``.
-        Off-diagonal entries follow ``H = -t sum_<ij> c_i^+ c_j``, so ``t_ij`` enters
-        ``h1`` as ``-t_ij``; the sign supplied here is preserved, and a negative
-        ``t_ij`` therefore yields a positive ``h1`` element. Diagonal entries are
-        treated as on-site energies and are copied through unchanged.
-    onsite_u : float or list of float, optional
-        Onsite Coulomb repulsion U_i (eV).
-    intersite_v : dict, optional
-        Intersite Coulomb repulsion V_ij between sites i and j.
-    constant : float, optional
-        Scalar energy offset.
-    energy_unit : str, optional
-        Unit of energy (default: 'eV').
+    if onsite_u is None:
+        u = [0.0] * n
+    elif isinstance(onsite_u, (int, float)):
+        u = [float(onsite_u)] * n
+    else:
+        u = [float(v) for v in onsite_u]
+        if len(u) != n:
+            raise ValueError("onsite_u list must contain n_orbitals values")
+    for i, value in enumerate(u):
+        h2[i][i][i][i] = value
 
-    Returns
-    -------
-    MaterialHamiltonian
-        Populated Hamiltonian with h1 and h2 tensors.
-    """
-    h1 = [[0.0 for _ in range(n_orbitals)] for _ in range(n_orbitals)]
-    h2 = [[[[0.0 for _ in range(n_orbitals)] for _ in range(n_orbitals)] for _ in range(n_orbitals)] for _ in range(n_orbitals)]
-
-    # Parse hopping_t
-    hop_dict: dict[tuple[int, int], float] = {}
-    if hopping_t is not None:
-        if isinstance(hopping_t, dict):
-            hop_dict = dict(hopping_t)
-        elif isinstance(hopping_t, list):
-            for i in range(n_orbitals):
-                for j in range(n_orbitals):
-                    val = hopping_t[i][j]
-                    if abs(val) > 1e-9:
-                        hop_dict[(i, j)] = val
-
-    # Fill 1-body matrix h1 under the standard convention H = -t sum_<ij> c_i^+ c_j,
-    # applied unconditionally so the sign of t is preserved: t = +1 and t = -1 are
-    # physically distinct models and must not collapse onto the same h1.
-    # Diagonal entries are on-site energies and are taken as given.
-    for (i, j), t_val in hop_dict.items():
-        if 0 <= i < n_orbitals and 0 <= j < n_orbitals:
-            h1[i][j] = -t_val if i != j else t_val
-
-    # Parse onsite_u
-    u_list = [0.0] * n_orbitals
-    if onsite_u is not None:
-        if isinstance(onsite_u, (int, float)):
-            u_list = [float(onsite_u)] * n_orbitals
-        elif isinstance(onsite_u, list):
-            u_list = [float(u) for u in onsite_u[:n_orbitals]] + [0.0] * max(0, n_orbitals - len(onsite_u))
-
-    # Fill 2-body onsite repulsion: (ii|ii) = U_i
-    for i in range(n_orbitals):
-        u_val = u_list[i]
-        if abs(u_val) > 1e-9:
-            h2[i][i][i][i] = u_val
-
-    # Parse intersite_v
-    v_dict: dict[tuple[int, int], float] = {}
-    if intersite_v is not None:
-        v_dict = dict(intersite_v)
-        for (i, j), v_val in v_dict.items():
-            if 0 <= i < n_orbitals and 0 <= j < n_orbitals and abs(v_val) > 1e-9:
-                # Intersite density-density (ij|ij) = (ji|ji) = V_ij
-                h2[i][i][j][j] = v_val
-                h2[j][j][i][i] = v_val
+    vdict = dict(intersite_v or {})
+    for (i, j), value in vdict.items():
+        if not (0 <= i < n and 0 <= j < n):
+            raise IndexError("intersite_v index outside orbital range")
+        h2[i][i][j][j] = float(value)
+        h2[j][j][i][i] = float(value)
 
     return MaterialHamiltonian(
-        n_orbitals=n_orbitals,
+        n_orbitals=n,
         n_electrons=n_electrons,
         constant=constant,
         energy_unit=energy_unit,
         h1=h1,
         h2=h2,
-        hopping_t=hop_dict,
-        onsite_u=u_list,
-        intersite_v=v_dict,
-        metadata={"model_type": "hubbard"},
+        hopping_t=hop,
+        onsite_u=u,
+        intersite_v=vdict,
+        metadata={"model_kind": "parameterized_hubbard", "ab_initio": False},
     )
 
 
-def build_active_space_hamiltonian(
+def _weighted_average(rows: list[list[float]], band: int, weights: list[float]) -> float:
+    values = [(row[band], weights[k]) for k, row in enumerate(rows) if band < len(row)]
+    if not values:
+        return 0.0
+    denom = sum(w for _, w in values)
+    return sum(v * w for v, w in values) / denom if denom else 0.0
+
+
+def build_band_model_hamiltonian(
     state: QEElectronicState | QERunResult,
     active_space: ActiveSpace,
     onsite_u_ev: float = 0.0,
     intersite_v_ev: float = 0.0,
 ) -> MaterialHamiltonian:
-    """Build a MaterialHamiltonian for an active space directly from DFT eigenvalues.
+    """Construct an explicitly *heuristic* band-derived effective model.
 
-    Parameters
-    ----------
-    state : QEElectronicState or QERunResult
-        The source electronic structure state containing band eigenvalues and occupations.
-    active_space : ActiveSpace
-        The selected active space partition.
-    onsite_u_ev : float, optional
-        Effective Hubbard U interaction (eV) to apply to active frontier orbitals.
-    intersite_v_ev : float, optional
-        Effective nearest-neighbor intersite Coulomb interaction (eV).
+    This function does **not** convert a QE Kohn-Sham calculation into an
+    ab-initio FCIDUMP Hamiltonian.  It takes selected band indices, uses the
+    k-weighted mean Kohn-Sham eigenvalue as a diagonal one-body model, and adds
+    caller-specified U/V parameters.  It is intended for workflow plumbing,
+    toy models, and controller tests only.
 
-    Returns
-    -------
-    MaterialHamiltonian
-        Hamiltonian spanning the active space orbitals.
+    A physical materials route should provide localized/downfolded integrals,
+    e.g. QE -> Wannier90 -> cRPA/interaction construction ->
+    :func:`build_integral_hamiltonian`.
     """
-    if isinstance(state, QERunResult):
-        el = state.electronic
-        tot_energy = state.electronic.total_energy_ev or (
-            state.electronic.total_energy_ry * 13.6056980659 if state.electronic.total_energy_ry else 0.0
-        )
-    else:
-        el = state
-        tot_energy = el.total_energy_ev or (el.total_energy_ry * 13.6056980659 if el.total_energy_ry else 0.0)
-
-    norb = active_space.n_active_orbitals
-    if norb == 0:
-        raise ValueError("Cannot construct Hamiltonian from an empty active space.")
-
-    h1 = [[0.0 for _ in range(norb)] for _ in range(norb)]
-    h2 = [[[[0.0 for _ in range(norb)] for _ in range(norb)] for _ in range(norb)] for _ in range(norb)]
-
-    # 1-body terms: diagonal Kohn-Sham orbital energies (averaged over k-points)
-    active_band_indices = active_space.active_orbitals
-    for loc_i, band_idx in enumerate(active_band_indices):
-        if el.eigenvalues_ev:
-            eigs = [k_eigs[band_idx] for k_eigs in el.eigenvalues_ev if band_idx < len(k_eigs)]
-            if eigs:
-                h1[loc_i][loc_i] = sum(eigs) / len(eigs)
-
-    # 2-body interaction terms
-    if abs(onsite_u_ev) > 1e-9:
-        for i in range(norb):
-            h2[i][i][i][i] = onsite_u_ev
-
-    if abs(intersite_v_ev) > 1e-9:
-        for i in range(norb - 1):
-            h2[i][i][i + 1][i + 1] = intersite_v_ev
-            h2[i + 1][i + 1][i][i] = intersite_v_ev
-
-    # Core electron contribution to constant shift
-    core_shift = 0.0
-    if active_space.frozen_core_orbitals and el.eigenvalues_ev:
-        for band_idx in active_space.frozen_core_orbitals:
-            eigs = [k_eigs[band_idx] for k_eigs in el.eigenvalues_ev if band_idx < len(k_eigs)]
-            if eigs:
-                core_shift += 2.0 * (sum(eigs) / len(eigs))
-
-    return MaterialHamiltonian(
-        n_orbitals=norb,
+    el = state.electronic if isinstance(state, QERunResult) else state
+    if el.lsda or el.noncolin or el.spinorbit:
+        raise NotImplementedError("band-model builder supports only restricted collinear QE results")
+    if not el.eigenvalues_ev:
+        raise ValueError("QE eigenvalues are required for the band-derived model")
+    n = active_space.n_active_orbitals
+    if n <= 0:
+        raise ValueError("active space is empty")
+    weights = el.normalized_kpoint_weights() or [1.0 / len(el.eigenvalues_ev)] * len(el.eigenvalues_ev)
+    h1 = [[0.0] * n for _ in range(n)]
+    for local, band in enumerate(active_space.active_orbitals):
+        h1[local][local] = _weighted_average(el.eigenvalues_ev, band, weights)
+    ham = build_hubbard_hamiltonian(
+        n_orbitals=n,
         n_electrons=active_space.n_active_electrons,
-        constant=round(core_shift, 6),
+        hopping_t=h1,  # diagonal entries pass through as onsite energies
+        onsite_u=onsite_u_ev,
+        intersite_v={(i, i + 1): intersite_v_ev for i in range(n - 1)} if abs(intersite_v_ev) > 1e-12 else None,
+        constant=0.0,
         energy_unit="eV",
-        h1=h1,
-        h2=h2,
-        onsite_u=[onsite_u_ev] * norb,
-        metadata={
-            "model_type": "dft_active_space",
-            "active_space_method": active_space.method,
-            "active_bands": active_band_indices,
-            "dft_total_energy_ev": tot_energy,
-        },
     )
+    ham.metadata.update({
+        "model_kind": "qe_band_heuristic",
+        "ab_initio": False,
+        "active_space_method": active_space.method,
+        "active_bands": list(active_space.active_orbitals),
+        "dft_total_energy_ev": el.total_energy_ev,
+        "one_body_source": "k-weighted mean Kohn-Sham eigenvalues",
+        "interaction_source": "user supplied U/V parameters",
+        "warning": "Not an ab-initio QE-to-FCIDUMP conversion; no Wannier/cRPA integral construction or DFT double-counting correction is performed.",
+    })
+    return ham
+
+
+def build_active_space_hamiltonian(*args: Any, **kwargs: Any) -> MaterialHamiltonian:
+    """Deprecated compatibility alias for :func:`build_band_model_hamiltonian`."""
+    warnings.warn(
+        "build_active_space_hamiltonian is a band-derived heuristic, not an ab-initio QE Hamiltonian. "
+        "Use build_band_model_hamiltonian for the heuristic path or build_integral_hamiltonian for physical integrals.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return build_band_model_hamiltonian(*args, **kwargs)
