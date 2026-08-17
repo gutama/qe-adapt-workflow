@@ -70,14 +70,35 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(data["run_id"], "al-cli-001")
             self.assertAlmostEqual(data["electronic"]["fermi_energy_ev"], 7.9421)
 
-    def test_dump_directory(self):
-        buffer = io.StringIO()
-        args = ["dump", str(FIXTURES)]
-        with redirect_stdout(buffer):
-            code = main(args)
-        self.assertEqual(code, 0)
-        data = json.loads(buffer.getvalue())
-        self.assertIn("calculation", data)
+    def test_dump_single_run_directory(self):
+        """A directory holding exactly one coherent run still dumps."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir) / "001_scf"
+            run_dir.mkdir()
+            for name in ("si_scf.in", "si_scf.out", "si_scf.xml"):
+                (run_dir / name).write_bytes((FIXTURES / name).read_bytes())
+
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = main(["dump", str(run_dir)])
+            self.assertEqual(code, 0)
+            data = json.loads(buffer.getvalue())
+            self.assertIn("calculation", data)
+            self.assertEqual(data["calculation"], "scf")
+
+    def test_dump_rejects_ambiguous_multi_run_directory(self):
+        """A workflow parent holding several runs must not be silently mixed.
+
+        The fixtures directory contains four unrelated calculations; pairing an
+        input from one with the XML of another used to produce a plausible-looking
+        record for a run that never existed.
+        """
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = main(["dump", str(FIXTURES)])
+        self.assertEqual(code, 1)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("Ambiguous QE run", err.getvalue())
 
     def test_report_stdout(self):
         buffer = io.StringIO()

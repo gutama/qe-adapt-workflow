@@ -103,5 +103,54 @@ class TestBandModelBoundary(unittest.TestCase):
         self.assertIn("not an ab-initio", ham.metadata["warning"].lower())
 
 
+class TestHoppingSignIsPreserved(unittest.TestCase):
+    """t = +1 and t = -1 are distinct models and must not collapse onto one h1.
+
+    Negating only positive hoppings mapped both onto the same matrix, so the
+    sign a caller supplied could not be recovered and the stored hopping_t dict
+    disagreed with h1 for negative t.
+    """
+
+    @staticmethod
+    def _h1_for(t: float) -> float:
+        ham = build_hubbard_hamiltonian(
+            n_orbitals=2,
+            n_electrons=2.0,
+            hopping_t={(0, 1): t, (1, 0): t},
+            onsite_u=4.0,
+        )
+        return ham.h1[0][1]
+
+    def test_opposite_signs_give_opposite_matrices(self):
+        self.assertAlmostEqual(self._h1_for(1.0), -1.0)
+        self.assertAlmostEqual(self._h1_for(-1.0), 1.0)
+        self.assertNotAlmostEqual(self._h1_for(1.0), self._h1_for(-1.0))
+
+    def test_convention_is_applied_unconditionally(self):
+        for t in (0.25, 1.0, 2.5, -0.25, -1.0, -2.5):
+            with self.subTest(t=t):
+                self.assertAlmostEqual(self._h1_for(t), -t)
+
+    def test_diagonal_entries_are_onsite_energies(self):
+        """Diagonal terms are site energies and pass through unnegated."""
+        ham = build_hubbard_hamiltonian(
+            n_orbitals=2,
+            n_electrons=2.0,
+            hopping_t={(0, 0): 0.75, (1, 1): -0.5},
+            onsite_u=4.0,
+        )
+        self.assertAlmostEqual(ham.h1[0][0], 0.75)
+        self.assertAlmostEqual(ham.h1[1][1], -0.5)
+
+    def test_hermiticity_is_retained(self):
+        ham = build_hubbard_hamiltonian(
+            n_orbitals=2,
+            n_electrons=2.0,
+            hopping_t={(0, 1): -1.3, (1, 0): -1.3},
+            onsite_u=4.0,
+        )
+        self.assertTrue(ham.is_hermitian())
+
+
 if __name__ == "__main__":
     unittest.main()

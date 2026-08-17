@@ -24,7 +24,14 @@ dependencies = [
 [project.optional-dependencies]
 plot = ["matplotlib>=3.6"]
 test = ["pytest>=7"]
-all = ["matplotlib>=3.6", "pytest>=7"]
+# Real ADAPT-VQE lives in the sibling clifford_qc project; without this extra the
+# ADAPT solver constructs but raises ImportError on solve().
+quantum = ["clifford_qc @ git+https://github.com/gutama/clifford_qc.git"]
+all = [
+  "matplotlib>=3.6",
+  "pytest>=7",
+  "clifford_qc @ git+https://github.com/gutama/clifford_qc.git",
+]
 
 [project.urls]
 Homepage = "https://github.com/gutama/qe-adapt-workflow"

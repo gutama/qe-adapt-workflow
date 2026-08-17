@@ -209,8 +209,30 @@ class OuterLoopLedger:
         elif n >= self.criteria.max_outer_iterations:
             reason = f"Reached maximum allowed outer iterations ({self.criteria.max_outer_iterations})"
         else:
-            missing = [key for key, val in passed.items() if val is False]
-            reason = "Outer loop not converged; pending/unavailable criteria: " + ", ".join(missing)
+            # A required criterion the solver never reported reads as False here, the
+            # same as one that simply missed tolerance. Name the difference, since the
+            # remedy differs: tighten the calculation, or relax require_* because this
+            # solver cannot supply that quantity at all.
+            unavailable = []
+            if pass_rdm is False and delta_rdm is None:
+                unavailable.append("rdm (not reported by this solver; set require_rdm=False)")
+            if pass_gradient is False and current.max_gradient is None:
+                unavailable.append(
+                    "gradient (not reported by this solver; set require_gradient=False)"
+                )
+            unmet = [
+                key
+                for key, val in passed.items()
+                if val is False
+                and not (key == "rdm" and delta_rdm is None)
+                and not (key == "gradient" and current.max_gradient is None)
+            ]
+            parts = []
+            if unmet:
+                parts.append("pending criteria: " + ", ".join(unmet))
+            if unavailable:
+                parts.append("unavailable criteria: " + ", ".join(unavailable))
+            reason = "Outer loop not converged; " + "; ".join(parts)
 
         return ConvergenceCheckResult(
             is_converged=converged,

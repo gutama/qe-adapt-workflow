@@ -40,6 +40,22 @@ class TestOuterLoop(unittest.TestCase):
             natural_occupations=[1.5, 0.5],
         )
 
+    def test_convergence_on_final_allowed_iteration_is_converged(self):
+        """Meeting every criterion on the last allowed iteration is a success.
+
+        The iteration limit must be evaluated after the criteria, otherwise a
+        genuinely self-consistent run is recorded as having merely run out.
+        """
+        ledger = OuterLoopLedger(ConvergenceCriteria(max_outer_iterations=2))
+        rdm = [[1.0, 0.0], [0.0, 1.0]]
+        ledger.record_iteration(self.dft, self.q(-10.0, rdm=rdm, residual=1e-6))
+        ledger.record_iteration(self.dft, self.q(-10.0, rdm=rdm, residual=1e-6))
+
+        check = ledger.check_convergence()
+        self.assertTrue(check.is_converged)
+        self.assertNotIn("Reached maximum", check.reason)
+        self.assertTrue(all(v is not False for v in check.passed_criteria.values()))
+
     def test_criteria_roundtrip_includes_required_flags(self):
         c = ConvergenceCriteria(require_rdm=False, require_gradient=True)
         r = ConvergenceCriteria.from_dict(c.to_dict())

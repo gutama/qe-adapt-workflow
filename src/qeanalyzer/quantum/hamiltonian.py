@@ -222,8 +222,15 @@ def build_hubbard_hamiltonian(
     intersite_v: dict[tuple[int, int], float] | None = None,
     constant: float = 0.0,
     energy_unit: str = "eV",
+    spin: int | None = None,
 ) -> MaterialHamiltonian:
-    """Build a parameterized restricted Hubbard/extended-Hubbard model."""
+    """Build a parameterized restricted Hubbard/extended-Hubbard model.
+
+    ``spin`` is MS2 = N_alpha - N_beta.  Left unset it defaults to the lowest
+    sector compatible with the electron count (0 for even, 1 for odd), so odd
+    electron counts produce a usable integer alpha/beta split instead of an
+    MS2=0 model that the solver and the FCIDUMP writer both reject.
+    """
     n = n_orbitals
     h1 = [[0.0] * n for _ in range(n)]
     h2 = [[[[0.0 for _ in range(n)] for _ in range(n)] for _ in range(n)] for _ in range(n)]
@@ -259,9 +266,12 @@ def build_hubbard_hamiltonian(
         h2[i][i][j][j] = float(value)
         h2[j][j][i][i] = float(value)
 
+    ms2 = int(round(n_electrons)) % 2 if spin is None else int(spin)
+
     return MaterialHamiltonian(
         n_orbitals=n,
         n_electrons=n_electrons,
+        spin=ms2,
         constant=constant,
         energy_unit=energy_unit,
         h1=h1,
