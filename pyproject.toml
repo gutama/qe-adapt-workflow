@@ -17,6 +17,10 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
 ]
 
+[project.optional-dependencies]
+plot = ["matplotlib>=3.6"]
+all = ["matplotlib>=3.6"]
+
 [project.scripts]
 qeanalyzer = "qeanalyzer.cli:main"
 

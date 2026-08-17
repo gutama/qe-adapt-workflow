@@ -112,9 +112,39 @@ class TestCLI(unittest.TestCase):
                 "--markdown",
             ]
             code = main(args)
+    def test_plot_scf_cli(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_png = Path(tmpdir) / "scf.png"
+            args = [
+                "plot",
+                str(FIXTURES / "si_scf.out"),
+                "-o",
+                str(out_png),
+                "--what",
+                "scf",
+            ]
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = main(args)
             self.assertEqual(code, 0)
-            self.assertTrue(out_file.exists())
-            self.assertIn("# Quantum ESPRESSO Run Analysis", out_file.read_text())
+            self.assertTrue(out_png.exists())
+            self.assertIn("Saved scf convergence plot", buffer.getvalue())
+
+    def test_plot_relax_cli(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_png = Path(tmpdir) / "relax.png"
+            args = [
+                "plot",
+                str(FIXTURES / "si_relax.out"),
+                "-o",
+                str(out_png),
+            ]
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                code = main(args)
+            self.assertEqual(code, 0)
+            self.assertTrue(out_png.exists())
+            self.assertIn("Saved relax convergence plot", buffer.getvalue())
 
 
 if __name__ == "__main__":

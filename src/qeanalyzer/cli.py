@@ -9,6 +9,7 @@ from pathlib import Path
 from . import __version__
 from .io import PWInput, PWOutput, QEXMLOutput, read_pw_input, read_pw_output, read_qe_xml
 from .models import build_run_result
+from .plotting import plot_relaxation_convergence, plot_scf_convergence
 from .report import dump_result_json, generate_text_report, save_result_json, save_text_report
 
 
@@ -107,6 +108,51 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plot(args: argparse.Namespace) -> int:
+    """Handle `qeanalyzer plot` subcommand."""
+    pw_in, pw_out, qe_xml, input_text = _detect_and_load_sources(args.paths)
+
+    if not pw_in and not pw_out and not qe_xml:
+        sys.stderr.write("Error: No valid Quantum ESPRESSO input (.in), output (.out), or XML (.xml) files found.\n")
+        return 1
+
+    result = build_run_result(
+        pw_in=pw_in,
+        pw_out=pw_out,
+        qe_xml=qe_xml,
+        run_id=args.run_id,
+        parent_run=args.parent_run,
+        input_text=input_text,
+    )
+
+    output_path = args.output
+    what = args.what
+
+    if what is None:
+        if (result.calculation in ("relax", "vc-relax") or len(result.convergence.ionic_steps) > 1 or result.status.opt_converged):
+            what = "relax"
+        else:
+            what = "scf"
+
+    if output_path is None:
+        output_path = f"{what}_convergence.png"
+
+    try:
+        if what == "scf":
+            plot_scf_convergence(result, output_path=output_path, title=args.title, dpi=args.dpi)
+        elif what in ("relax", "vc-relax"):
+            plot_relaxation_convergence(result, output_path=output_path, title=args.title, dpi=args.dpi)
+        else:
+            sys.stderr.write(f"Error: Unknown plot target '{what}'. Choose 'scf' or 'relax'.\n")
+            return 1
+    except Exception as exc:
+        sys.stderr.write(f"Error generating plot: {exc}\n")
+        return 1
+
+    sys.stdout.write(f"Saved {what} convergence plot to {output_path}\n")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build root CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -181,6 +227,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional parent run identifier in the workflow DAG",
     )
 
+    # plot subcommand
+    plot_parser = subparsers.add_parser(
+        "plot",
+        help="Generate convergence visualization figures",
+    )
+    plot_parser.add_argument(
+        "paths",
+        nargs="+",
+        help="Paths to calculation files (pw.out, data-file-schema.xml) or directories",
+    )
+    plot_parser.add_argument(
+        "-o", "--output",
+        help="Output destination path for the plot figure (e.g. scf_conv.png)",
+    )
+    plot_parser.add_argument(
+        "--what",
+        choices=["scf", "relax"],
+        help="Type of convergence plot to generate ('scf' or 'relax')",
+    )
+    plot_parser.add_argument(
+        "--title",
+        help="Custom figure title",
+    )
+    plot_parser.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="Image resolution DPI (default: 300)",
+    )
+    plot_parser.add_argument(
+        "--run-id",
+        help="Optional unique calculation run identifier",
+    )
+    plot_parser.add_argument(
+        "--parent-run",
+        help="Optional parent run identifier in the workflow DAG",
+    )
+
     return parser
 
 
@@ -193,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_dump(args)
     if args.command == "report":
         return cmd_report(args)
+    if args.command == "plot":
+        return cmd_plot(args)
 
     parser.print_help()
     return 0
