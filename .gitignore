@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+
+# Quantum ESPRESSO runtime artifacts
+*.wfc*
+*.mix*
+*.save/
+*.xml.tmp
+out/
+tmp/
