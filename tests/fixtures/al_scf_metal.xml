@@ -15,7 +15,7 @@
       <title>aluminum</title>
       <calculation>scf</calculation>
       <restart_mode>from_scratch</restart_mode>
-      <prefix>al</prefix>
+      <prefix>aluminum</prefix>
       <outdir>./tmp</outdir>
       <pseudo_dir>./pseudo</pseudo_dir>
     </control_variables>

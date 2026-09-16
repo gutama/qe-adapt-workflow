@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "qe-adapt-workflow"
 version = "0.1.0.dev0"
-description = "Reproducible Quantum ESPRESSO analysis and DFT-ADAPT-VQE workflow control"
+description = "Reproducible Quantum ESPRESSO analysis and DFT-correlated-solver workflow control"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -17,15 +17,26 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
 ]
 
-# numpy backs the quantum solver layer (exact diagonalization and the ADAPT-VQE
-# bridge), which is core functionality rather than an opt-in add-on.
 dependencies = [
   "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.6"]
+test = ["pytest>=7"]
+# `all` is the optional *runtime* feature set, so it excludes the test extra.
+#
+# Real ADAPT-VQE lives in the sibling clifford_qc project, which is not published
+# to an index. A PEP 508 direct git reference here made this project impossible
+# to upload to PyPI and unresolvable without git, so it is installed alongside
+# instead, as README "Installation" documents:
+#     pip install -e '../clifford_qc[openfermion]'
+# Without it the ADAPT solver still constructs and raises ImportError on solve().
 all = ["matplotlib>=3.6"]
+
+[project.urls]
+Homepage = "https://github.com/gutama/qe-adapt-workflow"
+QuantumBackend = "https://github.com/gutama/clifford_qc"
 
 [project.scripts]
 qeanalyzer = "qeanalyzer.cli:main"

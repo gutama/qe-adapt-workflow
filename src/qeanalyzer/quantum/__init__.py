@@ -1,4 +1,4 @@
-"""Quantum solver bridge and active space interfaces for DFT-ADAPT-VQE coupling."""
+"""Quantum-model interchange and solver interfaces for QE-ADAPT workflows."""
 
 from qeanalyzer.quantum.active_space import (
     ActiveSpace,
@@ -10,19 +10,9 @@ from qeanalyzer.quantum.active_space import (
     create_active_space_selector,
     select_active_space,
 )
-from qeanalyzer.quantum.adapt_bridge import (
-    ADAPTVQESolver,
-    ExactDiagonalizationSolver,
-    QuantumRunResult,
-    QuantumSolver,
-    create_quantum_solver,
-    solve_active_space,
-)
-from qeanalyzer.quantum.fcidump import (
-    parse_fcidump,
-    read_fcidump,
-    write_fcidump,
-)
+from qeanalyzer.quantum.adapt_bridge import QuantumRunResult, QuantumSolver
+from qeanalyzer.quantum.clifford_bridge import CliffordQCADAPTSolver, clifford_qc_available
+from qeanalyzer.quantum.fcidump import parse_fcidump, read_fcidump, write_fcidump
 from qeanalyzer.quantum.feedback import (
     ActiveSpaceFeedbackPolicy,
     HubbardUFeedbackPolicy,
@@ -33,7 +23,16 @@ from qeanalyzer.quantum.feedback import (
 from qeanalyzer.quantum.hamiltonian import (
     MaterialHamiltonian,
     build_active_space_hamiltonian,
+    build_band_model_hamiltonian,
     build_hubbard_hamiltonian,
+    build_integral_hamiltonian,
+)
+from qeanalyzer.quantum.solver_api import (
+    ADAPTVQESolver,
+    ExactDiagonalizationSolver,
+    SimulatedADAPTVQESolver,
+    create_quantum_solver,
+    solve_active_space,
 )
 
 __all__ = [
@@ -42,6 +41,7 @@ __all__ = [
     "ActiveSpaceFeedbackPolicy",
     "ActiveSpaceSelector",
     "BandIndexSelector",
+    "CliffordQCADAPTSolver",
     "EnergyWindowSelector",
     "ExactDiagonalizationSolver",
     "ExplicitOrbitalSelector",
@@ -52,9 +52,13 @@ __all__ = [
     "QuantumFeedbackPolicy",
     "QuantumRunResult",
     "QuantumSolver",
+    "SimulatedADAPTVQESolver",
     "apply_quantum_feedback",
     "build_active_space_hamiltonian",
+    "build_band_model_hamiltonian",
     "build_hubbard_hamiltonian",
+    "build_integral_hamiltonian",
+    "clifford_qc_available",
     "create_active_space_selector",
     "create_quantum_solver",
     "parse_fcidump",

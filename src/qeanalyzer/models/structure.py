@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from qeanalyzer.io.qe_xml import BOHR_TO_ANGSTROM
+from qeanalyzer.constants import BOHR_TO_ANGSTROM
 
 
 @dataclass
