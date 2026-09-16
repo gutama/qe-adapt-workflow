@@ -4,10 +4,10 @@ A reproducible analysis and workflow-control layer for serial **Quantum ESPRESSO
 
 The repository is intentionally split from [`gutama/clifford_qc`](https://github.com/gutama/clifford_qc):
 
-- **qe-adapt-workflow owns** QE parsing, diagnostics, run provenance, next-input generation, active-space *selection metadata*, finite-Hamiltonian interchange, and outer-loop orchestration.
-- **clifford_qc owns** ADAPT-VQE, Pauli/Clifford operator algebra, measurement/selection machinery, and related quantum algorithms.
+- **qe-adapt-workflow owns** QE parsing, diagnostics, run provenance, next-input generation, active-space *selection metadata*, finite-Hamiltonian interchange, solver selection/comparison, and outer-loop orchestration.
+- **clifford_qc owns** ADAPT-VQE, A-CASE, Pauli/Clifford operator algebra, measurement/selection machinery, and related quantum algorithms.
 
-This avoids maintaining a second scientific ADAPT implementation here.
+This avoids maintaining a second scientific implementation of any of them here. The workflow is **not ADAPT-only**: it drives a registry of correlated methods that all speak one `QuantumSolver` interface, and it can run several of them on one Hamiltonian and keep every answer.
 
 ## Scientific status
 
@@ -22,6 +22,9 @@ The software framework is implemented, but not every path has the same physical 
 | Small-space exact FCI reference solver | Implemented |
 | FCIDUMP I/O | Implemented; **FCIDUMP boundary is Hartree** |
 | Real ADAPT-VQE | Delegated to `clifford_qc.algorithms.adapt.run_adapt` |
+| Real A-CASE subspace eigensolver | Delegated to `clifford_qc.subspace.run_acase` |
+| ADAPT-warm-started A-CASE | Delegated to `clifford_qc.subspace.adapt_warm_start`; **a warmer reference is not automatically a better answer** |
+| Multi-arm method comparison | Implemented; a **record**, not a benchmark verdict -- budget matching is never inferred |
 | QE band-derived toy/effective model | Implemented, explicitly heuristic |
 | Ab-initio QE → correlated Hamiltonian | **Not yet implemented**; requires Wannier/downfolding/integrals |
 | Quantum → DFT feedback policies | Experimental controller heuristics, not a validated self-consistency functional |
@@ -52,11 +55,15 @@ qeanalyzer
                  FCIDUMP (Hartree)                   │
                      │                               │
                      ▼                               │
-              gutama/clifford_qc                     │
-              real ADAPT-VQE                         │
+          solver registry (one Hamiltonian)          │
+          ├─ exact FCI reference (in repo)           │
+          ├─ ADAPT-VQE ──────┐                       │
+          ├─ A-CASE ─────────┤ gutama/clifford_qc    │
+          ├─ ADAPT → A-CASE ─┘ (warm start)          │
+          └─ compare: several arms, all recorded     │
                      │                               │
                      ▼                               │
-            energy / state / 1-RDM                   │
+        energy / 1-RDM / residual (+ every arm)      │
                      │                               │
                      ▼                               │
           experimental feedback policy ──────────────┘
@@ -78,13 +85,82 @@ For plotting:
 pip install -e '.[plot]'
 ```
 
-For **real ADAPT-VQE**, install the sibling `clifford_qc` project in the same environment. The chemistry/openfermion extra supplies the excitation-pool adapter used by this repository:
+For **real ADAPT-VQE and A-CASE**, install the sibling `clifford_qc` project in the same environment. The chemistry/openfermion extra supplies the excitation-pool adapter used by the ADAPT path:
 
 ```bash
 pip install -e '../clifford_qc[openfermion]'
 ```
 
-If `clifford_qc` is not installed, `create_quantum_solver("adapt_vqe")` fails loudly. A separate `SimulatedADAPTVQESolver` exists only for workflow plumbing tests and is explicitly marked non-scientific.
+The `openfermion` extra is needed only by ADAPT's chemistry excitation pool: A-CASE builds its own determinant excitations and runs without it. If `clifford_qc` is not installed, solving with those names fails loudly and says what to install; the names themselves still resolve, so a script can be written before the backend is present. A separate `SimulatedADAPTVQESolver` exists only for workflow plumbing tests and is explicitly marked non-scientific.
+
+## Correlated methods
+
+ADAPT-VQE is one arm of the registry, not the whole workflow:
+
+| name | what it is | needs |
+|---|---|---|
+| `exact` | small-space exact FCI, in this repository | -- |
+| `adapt_vqe` | adaptively grown **unitary ansatz**, variationally optimized | `clifford_qc` |
+| `acase` | **A-CASE**: Rayleigh-Ritz in `span{A_i\|psi>}` grown around the reference determinant | `clifford_qc.subspace` |
+| `adapt_acase` | ADAPT-VQE state used as the A-CASE reference (warm start) | `clifford_qc.subspace` |
+| `compare` | several arms on one Hamiltonian, every answer recorded | per arm |
+| `simulated_adapt` | explicit non-scientific mock for plumbing tests | -- |
+
+```bash
+qeanalyzer solvers        # the same table, plus which backends are installed here
+```
+
+A-CASE is a different algorithm from ADAPT-VQE, not a second name for it: it grows a *linear subspace* and solves a projected generalized eigenproblem instead of optimizing ansatz parameters. It therefore reports a Ritz residual rather than a pool gradient, and no variational parameters at all. See [`docs/SCIENTIFIC_BOUNDARIES.md`](docs/SCIENTIFIC_BOUNDARIES.md) §7a.
+
+### Combining methods
+
+Three compositions are supported, and each is explicit about what it does *not* claim:
+
+```python
+from qeanalyzer.quantum import compare_solvers, create_quantum_solver
+
+# 1. Sequential: ADAPT-VQE first, its optimized state as the A-CASE reference.
+warm = create_quantum_solver("adapt_acase", adapt_max_operators=4, max_basis_size=12)
+result = warm.solve(ham)
+result.metadata["grew_beyond_reference"]   # did the subspace improve on ADAPT at all?
+
+# 2. Side by side: one Hamiltonian, several methods, every arm kept.
+comparison = compare_solvers(
+    ham,
+    [
+        "exact",
+        {"solver_type": "acase", "label": "acase_m12", "options": {"max_basis_size": 12}},
+        {"solver_type": "adapt_vqe", "label": "adapt_8", "options": {"max_adapt_iterations": 8}},
+    ],
+    budget_note="basis 12 vs 8 ADAPT operators -- NOT cost-matched",
+)
+print(comparison.summary())
+
+# 3. Inside the outer loop: drive on one arm, record them all in the ledger.
+multi = create_quantum_solver("compare", arms=["exact", "acase"], selection="acase")
+```
+
+A warm start is **not** an improvement by construction. A converged ADAPT state is stationary against the same excitation family A-CASE grows with, so the subspace can decline to grow while still sitting above the exact energy; the bridge reports that rather than reading "no growth" as "converged". The upstream project has replicated a case where a better ADAPT reference gave a *worse* subspace.
+
+A comparison is a record, not a verdict. Arms are ranked only as variational upper bounds on the same Hamiltonian and sector, the non-scientific mock is recorded but never ranked, and `matched_budget_declared` is true only when the caller declares the matching.
+
+### Adding another method
+
+One `SolverSpec`, registered once:
+
+```python
+from qeanalyzer.quantum import SolverSpec, register_solver
+
+register_solver(SolverSpec(
+    name="my_method",
+    factory=MySolver,                 # implements QuantumSolver.solve -> QuantumRunResult
+    summary="what it actually is",
+    scientific_status="delegated_to_somewhere",
+    requires="my_backend",
+))
+```
+
+Registration is append-only and refuses to shadow an existing name, so `create_quantum_solver("adapt_vqe")` cannot come to mean something else depending on import order.
 
 ## CLI
 
@@ -147,7 +223,7 @@ The code deliberately does not treat a Kohn-Sham Hamiltonian plus arbitrary bare
 from qeanalyzer.quantum import (
     build_integral_hamiltonian,
     write_fcidump,
-    CliffordQCADAPTSolver,
+    create_quantum_solver,
 )
 
 ham = build_integral_hamiltonian(
@@ -159,7 +235,7 @@ ham = build_integral_hamiltonian(
 )
 
 write_fcidump(ham, "FCIDUMP")
-result = CliffordQCADAPTSolver().solve(ham)
+result = create_quantum_solver("adapt_vqe").solve(ham)     # or "acase", "adapt_acase", ...
 ```
 
 The restricted finite-Hamiltonian convention is fixed as
@@ -195,7 +271,7 @@ scientific_status = experimental_heuristic
 
 They are controller experiments, not a derived DFT+many-body functional.
 
-Outer-loop convergence is fail-closed: if RDM or ADAPT-gradient criteria are required but unavailable, they do **not** count as passed. Setting `require_rdm=False` or `require_gradient=False` removes that criterion from the convergence test altogether -- the quantity is still recorded for provenance, but the loop no longer closes on it.
+Outer-loop convergence is fail-closed: if the RDM or residual criteria are required but unavailable, they do **not** count as passed. The third criterion is the *solver-reported residual* -- an ADAPT pool gradient, an A-CASE Ritz residual norm, or zero from the exact solver -- and each iteration records which quantity it compared (`quantum_residual_kind`). Residuals are in Hartree, the interchange unit of the `clifford_qc` boundary, while energies are in eV. Setting `require_rdm=False` or `require_gradient=False` removes that criterion from the convergence test altogether -- the quantity is still recorded for provenance, but the loop no longer closes on it.
 
 ## Tests
 

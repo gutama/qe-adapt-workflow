@@ -156,3 +156,84 @@ class TestRequireFlagsDisableCriteria(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMethodAgnosticResidual(unittest.TestCase):
+    """The loop's third criterion is "residual", not "ADAPT gradient".
+
+    Reading only ``metadata['residual_gradient']`` made every solver that has no
+    operator gradient -- A-CASE among them -- look like one that had failed to
+    report, which fails closed on a quantity it was never going to supply.
+    """
+
+    def setUp(self):
+        self.dft = build_run_result(
+            pw_in=read_pw_input(FIXTURES / "si_scf.in"),
+            pw_out=read_pw_output(FIXTURES / "si_scf.out"),
+            qe_xml=read_qe_xml(FIXTURES / "si_scf.xml"),
+            run_id="dft-1",
+        )
+
+    @staticmethod
+    def quantum(energy, residual=None, residual_kind="", metadata=None, rdm=None):
+        return QuantumRunResult(
+            energy_ev=energy,
+            electronic_energy_ev=energy,
+            solver_type="clifford_qc_acase",
+            n_orbitals=2,
+            n_electrons=2.0,
+            n_spin_orbitals=4,
+            one_rdm=rdm or [[1.0, 0.0], [0.0, 1.0]],
+            natural_occupations=[1.0, 1.0],
+            residual=residual,
+            residual_kind=residual_kind,
+            metadata=metadata or {},
+        )
+
+    def test_a_ritz_residual_is_read_like_an_adapt_gradient(self):
+        ledger = OuterLoopLedger(ConvergenceCriteria(gradient_tolerance=1e-3))
+        record = ledger.record_iteration(
+            self.dft, self.quantum(-1.0, residual=1e-9, residual_kind="ritz_residual_norm")
+        )
+        self.assertEqual(record.max_gradient, 1e-9)
+        self.assertEqual(record.metadata["quantum_residual_kind"], "ritz_residual_norm")
+
+        ledger.record_iteration(
+            self.dft, self.quantum(-1.0, residual=1e-9, residual_kind="ritz_residual_norm")
+        )
+        status = ledger.check_convergence()
+        self.assertTrue(status.passed_criteria["gradient"])
+        self.assertTrue(status.is_converged)
+
+    def test_the_legacy_adapt_key_is_still_honoured(self):
+        ledger = OuterLoopLedger()
+        record = ledger.record_iteration(
+            self.dft, self.quantum(-1.0, metadata={"residual_gradient": 2e-4})
+        )
+        self.assertEqual(record.max_gradient, 2e-4)
+
+    def test_a_solver_that_reports_no_residual_still_fails_closed(self):
+        ledger = OuterLoopLedger()
+        for _ in range(2):
+            ledger.record_iteration(self.dft, self.quantum(-1.0))
+        status = ledger.check_convergence()
+        self.assertFalse(status.is_converged)
+        self.assertFalse(status.passed_criteria["gradient"])
+        self.assertIn("not reported by this solver", status.reason)
+
+    def test_every_comparison_arm_reaches_the_ledger(self):
+        comparison = {"selected_label": "acase", "arms": [
+            {"label": "exact", "energy_ev": -1.5},
+            {"label": "acase", "energy_ev": -1.4},
+        ]}
+        ledger = OuterLoopLedger()
+        record = ledger.record_iteration(
+            self.dft,
+            self.quantum(-1.4, residual=1e-9, residual_kind="ritz_residual_norm",
+                         metadata={"comparison": comparison, "selected_arm": "acase"}),
+        )
+        self.assertEqual(record.metadata["comparison"], comparison)
+        self.assertEqual(
+            [arm["label"] for arm in record.metadata["comparison"]["arms"]],
+            ["exact", "acase"],
+        )

@@ -330,3 +330,30 @@ class TestCLI(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSolversCommand(unittest.TestCase):
+    """`qeanalyzer solvers` answers "what can this workflow drive, here?"."""
+
+    def _run(self) -> str:
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            code = main(["solvers"])
+        self.assertEqual(code, 0)
+        return buffer.getvalue()
+
+    def test_every_registered_method_is_listed(self):
+        from qeanalyzer.quantum import available_solvers
+
+        output = self._run()
+        for spec in available_solvers():
+            with self.subTest(name=spec.name):
+                self.assertIn(spec.name, output)
+
+    def test_the_listing_marks_the_mock_as_a_mock(self):
+        self.assertIn("workflow_mock", self._run())
+
+    def test_optional_backend_availability_is_reported(self):
+        output = self._run()
+        self.assertIn("clifford_qc:", output)
+        self.assertIn("clifford_qc.subspace:", output)

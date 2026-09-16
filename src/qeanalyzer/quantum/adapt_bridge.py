@@ -1,7 +1,10 @@
 """Quantum-solver interfaces and a small exact reference solver.
 
-Scientific ADAPT-VQE is intentionally *not* implemented here.  The public
-``ADAPTVQESolver`` constructor delegates to the sibling ``clifford_qc`` project.
+Every correlated method this workflow can drive -- ADAPT-VQE, A-CASE and any
+later addition -- implements the :class:`QuantumSolver` interface defined here
+and reports a :class:`QuantumRunResult`.  The scientific implementations
+themselves are *not* here: they belong to the sibling ``clifford_qc`` project
+and are reached through :mod:`qeanalyzer.quantum.clifford_bridge`.
 ``SimulatedADAPTVQESolver`` is retained only as an explicitly named workflow
 mock.
 """
@@ -40,6 +43,20 @@ class QuantumRunResult:
     one_rdm: list[list[float]] = field(default_factory=list)
     natural_occupations: list[float] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Method-agnostic convergence residual, and what it actually is.  ADAPT
+    # reports a pool gradient, a subspace eigensolver a Ritz residual norm, the
+    # exact solver zero; the outer loop only needs "how far from stationary is
+    # this, in the solver's own terms", so it reads this instead of assuming
+    # every method has an operator gradient.  ``None`` means the solver cannot
+    # supply the quantity at all -- it is not a zero.
+    #
+    # UNIT: Hartree, not eV.  Energies in this record are eV; the residual keeps
+    # the Hartree interchange unit of the clifford_qc boundary so that one
+    # ``gradient_tolerance`` in ConvergenceCriteria means the same thing for
+    # every solver.  ``residual_kind`` names the quantity so a ledger entry is
+    # never an unlabelled number.
+    residual: float | None = None
+    residual_kind: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +76,8 @@ class QuantumRunResult:
             "one_rdm": self.one_rdm,
             "natural_occupations": list(self.natural_occupations),
             "metadata": dict(self.metadata),
+            "residual": self.residual,
+            "residual_kind": self.residual_kind,
         }
 
     @classmethod
@@ -80,15 +99,22 @@ class QuantumRunResult:
             one_rdm=data.get("one_rdm", []),
             natural_occupations=data.get("natural_occupations", []),
             metadata=data.get("metadata", {}),
+            residual=data.get("residual"),
+            residual_kind=data.get("residual_kind", ""),
         )
 
     def summary(self) -> str:
+        residual = (
+            "not reported" if self.residual is None
+            else f"{self.residual:.6e} Ha ({self.residual_kind})"
+        )
         return "\n".join([
             f"Quantum Calculation [{self.solver_type}]",
             "=" * 40,
             f"Total Ground Energy: {self.energy_ev:.8f} eV",
             f"Electronic Energy  : {self.electronic_energy_ev:.8f} eV",
             f"Active (orb / elec): {self.n_orbitals} / {self.n_electrons:.8g}",
+            f"Residual           : {residual}",
             f"Converged          : {self.converged}",
         ])
 
@@ -242,7 +268,16 @@ class ExactDiagonalizationSolver(QuantumSolver):
             converged=True,
             one_rdm=one_rdm.tolist(),
             natural_occupations=[round(x, 10) for x in natural],
-            metadata={"fci_dimension": dim, "integral_convention": "chemist_(pq|rs)"},
+            # Exact eigenvector of the sector: the residual is zero by
+            # construction, which is a reported zero rather than a missing value.
+            residual=0.0,
+            residual_kind="exact_sector_eigenvector",
+            metadata={
+                "fci_dimension": dim,
+                "integral_convention": "chemist_(pq|rs)",
+                "scientific_status": "exact_reference",
+                "residual_unit": "Hartree",
+            },
         )
 
 
@@ -293,6 +328,8 @@ class SimulatedADAPTVQESolver(QuantumSolver):
             iteration_energies=energies,
             one_rdm=exact.one_rdm,
             natural_occupations=exact.natural_occupations,
+            residual=None,  # no physical residual exists for a fabricated trajectory
+            residual_kind="",
             metadata={
                 "scientific_status": "workflow_mock",
                 "residual_gradient": None,

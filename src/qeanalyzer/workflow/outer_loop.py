@@ -17,6 +17,17 @@ if TYPE_CHECKING:
 
 @dataclass
 class ConvergenceCriteria:
+    """Outer-loop tolerances.
+
+    ``gradient_tolerance`` is the *solver-reported residual* tolerance, not an
+    ADAPT-specific quantity: ADAPT reports a pool gradient, A-CASE a Ritz
+    residual norm, the exact solver zero.  The key keeps its name so existing
+    ledgers stay readable, and ``QuantumRunResult.residual_kind`` records which
+    quantity a given iteration actually compared.  Residuals cross the
+    clifford_qc boundary in Hartree, so this tolerance is in Hartree while the
+    energy tolerance is in eV.
+    """
+
     energy_tolerance_ev: float = 1e-4
     rdm_tolerance: float = 1e-3
     gradient_tolerance: float = 1e-3
@@ -81,6 +92,13 @@ class ConvergenceCheckResult:
 
 @dataclass
 class OuterLoopIterationRecord:
+    """One DFT/correlated iteration as stored in the ledger.
+
+    ``adapt_operators`` holds whatever the solver selected -- ADAPT rotors, or
+    the A-CASE basis labels -- and ``max_gradient`` the residual it reported,
+    whose kind is recorded in ``metadata['quantum_residual_kind']``.
+    """
+
     iteration_index: int
     dft_run_id: str
     dft_energy_ev: float
@@ -131,7 +149,12 @@ class OuterLoopLedger:
                          metadata: dict[str, Any] | None = None) -> OuterLoopIterationRecord:
         idx = len(self.iterations) + 1
         dft_energy = dft_result.electronic.total_energy_ev
-        residual = quantum_result.metadata.get("residual_gradient")
+        # Method-agnostic first: a subspace eigensolver has no operator gradient
+        # to report, and reading only the ADAPT-shaped keys made every such
+        # solver look like one that had failed to report.
+        residual = quantum_result.residual
+        if residual is None:
+            residual = quantum_result.metadata.get("residual_gradient")
         if residual is None and quantum_result.operator_gradients:
             residual = quantum_result.operator_gradients[-1]
         record = OuterLoopIterationRecord(
@@ -147,6 +170,12 @@ class OuterLoopLedger:
             metadata={
                 "quantum_solver_type": quantum_result.solver_type,
                 "quantum_converged": quantum_result.converged,
+                "quantum_residual_kind": quantum_result.residual_kind,
+                "quantum_scientific_status": quantum_result.metadata.get("scientific_status", ""),
+                # A multi-arm solve keeps every arm in the ledger, not just the
+                # one the loop went on to use.
+                **({"comparison": quantum_result.metadata["comparison"]}
+                   if "comparison" in quantum_result.metadata else {}),
                 **(metadata or {}),
             },
         )
@@ -226,7 +255,7 @@ class OuterLoopLedger:
                 unavailable.append("rdm (not reported by this solver; set require_rdm=False)")
             if pass_gradient is False and current.max_gradient is None:
                 unavailable.append(
-                    "gradient (not reported by this solver; set require_gradient=False)"
+                    "residual (not reported by this solver; set require_gradient=False)"
                 )
             unmet = [
                 key
