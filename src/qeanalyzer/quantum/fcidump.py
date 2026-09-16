@@ -30,7 +30,7 @@ def write_fcidump(
     hamiltonian: MaterialHamiltonian,
     path: str | Path | None = None,
     orbsym: list[int] | None = None,
-    isym: int = 1,
+    isym: int | None = None,
     tolerance: float = 1e-12,
 ) -> str:
     """Export a restricted real Hamiltonian to FCIDUMP.
@@ -39,6 +39,12 @@ def write_fcidump(
     quantity to **Hartree**, regardless of ``hamiltonian.energy_unit``.  This
     makes files interoperable with PySCF, NECI, Dice, ``clifford_qc`` and other
     conventional consumers.
+
+    Point-group symmetry is provenance, not a default: when ``orbsym``/``isym``
+    are not given they are taken from ``hamiltonian.metadata``, where
+    :func:`parse_fcidump` records them.  Writing all-ones instead silently
+    dropped the symmetry blocking that consumers such as NECI and Dice rely on,
+    so a read-modify-write round-trip changed the calculation being described.
     """
     if tolerance < 0.0:
         raise ValueError("tolerance must be non-negative")
@@ -49,9 +55,11 @@ def write_fcidump(
     ms2 = int(hamiltonian.spin)
     if abs(ms2) > nelec or (nelec + ms2) % 2:
         raise ValueError("NELEC and MS2 do not define an integer alpha/beta sector")
-    sym = list(orbsym) if orbsym is not None else [1] * norb
+    declared = orbsym if orbsym is not None else hamiltonian.metadata.get("orbsym")
+    sym = [int(x) for x in declared] if declared is not None else [1] * norb
     if len(sym) != norb:
         raise ValueError("ORBSYM must contain exactly NORB entries")
+    resolved_isym = int(isym) if isym is not None else int(hamiltonian.metadata.get("isym", 1))
 
     lines = [
         "&FCI",
@@ -59,7 +67,7 @@ def write_fcidump(
         f" NELEC={nelec},",
         f" MS2={ms2},",
         f" ORBSYM={','.join(str(int(x)) for x in sym)},",
-        f" ISYM={int(isym)},",
+        f" ISYM={resolved_isym},",
         " IUHF=0,",
         "/",
     ]

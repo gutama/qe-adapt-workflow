@@ -76,5 +76,49 @@ class TestFCIDUMP(unittest.TestCase):
             parse_fcidump("&FCI NORB=2, NELEC=2, IUHF=1 /\n0.0 0 0 0 0\n")
 
 
+class TestSymmetryRoundTrip(unittest.TestCase):
+    SOURCE = """&FCI
+ NORB=2,
+ NELEC=2,
+ MS2=0,
+ ORBSYM=3,5,
+ ISYM=4,
+/
+  0.6000000000000000E+00    1    1    1    1
+ -1.2500000000000000E+00    1    1    0    0
+ -0.4750000000000000E+00    2    2    0    0
+  0.7000000000000000E+00    0    0    0    0
+"""
+
+    def test_point_group_symmetry_survives_a_round_trip(self):
+        """All-ones ORBSYM silently changed the calculation NECI/Dice would run."""
+        written = write_fcidump(parse_fcidump(self.SOURCE))
+        self.assertIn(" ORBSYM=3,5,", written)
+        self.assertIn(" ISYM=4,", written)
+        self.assertEqual(parse_fcidump(written).metadata["orbsym"], [3, 5])
+        self.assertEqual(parse_fcidump(written).metadata["isym"], 4)
+
+    def test_explicit_arguments_still_win(self):
+        written = write_fcidump(parse_fcidump(self.SOURCE), orbsym=[1, 1], isym=1)
+        self.assertIn(" ORBSYM=1,1,", written)
+        self.assertIn(" ISYM=1,", written)
+
+    def test_hamiltonian_without_symmetry_metadata_gets_the_neutral_default(self):
+        written = write_fcidump(build_hubbard_hamiltonian(n_orbitals=2, n_electrons=2.0))
+        self.assertIn(" ORBSYM=1,1,", written)
+        self.assertIn(" ISYM=1,", written)
+
+
+class TestConstantsHaveOneSource(unittest.TestCase):
+    def test_xml_and_fcidump_boundaries_share_the_same_constants(self):
+        """Two copies would let a CODATA update desync parsed and exported energies."""
+        from qeanalyzer.constants import HARTREE_TO_EV as canonical
+        from qeanalyzer.io.qe_xml import HARTREE_TO_EV as from_xml
+        from qeanalyzer.quantum.units import HARTREE_TO_EV as from_units
+
+        self.assertIs(from_xml, canonical)
+        self.assertIs(from_units, canonical)
+
+
 if __name__ == "__main__":
     unittest.main()

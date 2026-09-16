@@ -144,8 +144,29 @@ In particular:
 
 Missing information is not success.
 
-If `require_rdm=True`, missing or shape-incompatible 1-RDMs fail the RDM criterion. If `require_gradient=True`, an unavailable residual ADAPT gradient fails the gradient criterion. A workflow may disable either requirement explicitly, but absence is never silently converted to zero.
+If `require_rdm=True`, missing or shape-incompatible 1-RDMs fail the RDM criterion. If `require_gradient=True`, an unavailable residual ADAPT gradient fails the gradient criterion. Absence is never silently converted to zero.
+
+`require_rdm=False` / `require_gradient=False` switch the criterion off entirely: the quantity is still measured and recorded in the ledger for provenance, but it cannot gate convergence. The flag is a statement about which criteria the workflow is closing on, not merely permission for the solver to omit one -- otherwise a solver that *did* report the quantity would still gate a loop the user had already excluded it from, and that loop could never terminate.
 
 ## 10. Source coherence
 
-One `QERunResult` must describe one QE run. CLI discovery therefore scans one run directory, plus its immediate `*.save/data-file-schema.xml`, and rejects ambiguous multiple inputs/outputs/XML files. It does not recursively combine files from several serial calculations.
+One `QERunResult` must describe one QE run. CLI discovery therefore scans one run directory plus the `outdir` locations QE writes XML to, and rejects ambiguous multiple inputs/outputs/XML files. It does not recursively combine files from several serial calculations.
+
+Concretely, discovery resolves `<prefix>.save/` both directly in the run directory and one level below it, because `outdir` is normally a subdirectory of the run (`outdir='./tmp'`). The scan stops at that depth: anything deeper is a workflow parent, not one run.
+
+Coherence is judged per run, not per file. QE >= 6.4 writes a single run's XML record twice -- `<outdir>/<prefix>.xml` and `<outdir>/<prefix>.save/data-file-schema.xml` -- so both map to the same `(outdir, prefix)` run identity and the canonical schema record is used. Two *different* prefixes in one directory remain ambiguous and are still rejected.
+
+## 11. Periodic band sampling for energy windows
+
+`EnergyWindowSelector` judges a band against the window at one of four samplings, recorded in the active-space metadata as `kpoint_mode_resolved`:
+
+- `gamma` reads the band at the Gamma point, located by coordinate rather than assumed to be listed first.
+- `average` uses the k-point-weighted mean over the Brillouin zone.
+- `any` includes a band that enters the window anywhere in the zone.
+- `auto` (the default) uses Gamma when the result contains it and the weighted average otherwise.
+
+`auto` exists because Gamma is not always sampled: a shifted Monkhorst-Pack mesh has no k-point at (0, 0, 0), and a result built from `pw.out` alone carries no k-point coordinates at all. Requesting `gamma` explicitly still raises in both cases, since the caller asked for one specific k-point; `auto` records which sampling it actually used rather than leaving the choice implicit.
+
+## 12. FCIDUMP symmetry provenance
+
+`ORBSYM`/`ISYM` are provenance, not defaults. `write_fcidump` takes them from the caller, else from `MaterialHamiltonian.metadata` where `parse_fcidump` records them, and only falls back to all-ones/1 for a Hamiltonian that never carried point-group symmetry. Writing all-ones unconditionally would make a read-modify-write round-trip silently drop the symmetry blocking that consumers such as NECI and Dice use, changing the calculation the file describes.

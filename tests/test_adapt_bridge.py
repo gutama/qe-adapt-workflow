@@ -17,6 +17,7 @@ from qeanalyzer.quantum import (
     ExactDiagonalizationSolver,
     QuantumRunResult,
     SimulatedADAPTVQESolver,
+    solve_active_space,
     build_hubbard_hamiltonian,
     clifford_qc_available,
     create_quantum_solver,
@@ -221,6 +222,62 @@ class TestFCISameSpinDoubleExcitations(unittest.TestCase):
         ref = ExactDiagonalizationSolver().solve(self._model_hamiltonian(4.0))
         # The high-spin sector must lie above the unrestricted ground state.
         self.assertGreater(res.energy_ev, ref.energy_ev)
+
+
+class TestSolverFacade(unittest.TestCase):
+    """One factory, one alias set, and options that land somewhere or raise.
+
+    The factory used to exist twice -- here and in ``adapt_bridge`` -- with
+    different aliases and a different ADAPTVQESolver, so the answer depended on
+    which module the caller imported from.
+    """
+
+    @staticmethod
+    def _dimer():
+        return build_hubbard_hamiltonian(
+            n_orbitals=2,
+            n_electrons=2.0,
+            hopping_t={(0, 1): 1.0, (1, 0): 1.0},
+            onsite_u=2.0,
+        )
+
+    def test_adapt_aliases_all_resolve_to_the_clifford_backend(self):
+        for alias in ("adapt", "adapt-vqe", "adapt_vqe", "vqe", "clifford_adapt",
+                      "clifford_qc_adapt", "ADAPT-VQE"):
+            with self.subTest(alias=alias):
+                self.assertIsInstance(create_quantum_solver(alias), CliffordQCADAPTSolver)
+
+    def test_adapt_bridge_no_longer_ships_a_second_factory(self):
+        from qeanalyzer.quantum import adapt_bridge, solver_api
+
+        for name in ("create_quantum_solver", "ADAPTVQESolver", "solve_active_space"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(adapt_bridge, name))
+                self.assertTrue(hasattr(solver_api, name))
+
+    def test_solve_active_space_matches_the_solver_it_names(self):
+        ham = self._dimer()
+        self.assertAlmostEqual(
+            solve_active_space(ham).energy_ev,
+            ExactDiagonalizationSolver().solve(ham).energy_ev,
+            places=10,
+        )
+
+    def test_solver_options_reach_the_constructor(self):
+        solver = create_quantum_solver("adapt_vqe", gradient_threshold=1e-9, maxiter=7)
+        self.assertEqual(solver.gradient_threshold, 1e-9)
+        self.assertEqual(solver.maxiter, 7)
+
+    def test_options_the_exact_solver_cannot_use_are_rejected(self):
+        """Silently dropping them let a caller's setting take effect nowhere."""
+        with self.assertRaisesRegex(TypeError, "takes no options"):
+            create_quantum_solver("exact", gradient_threshold=1e-6)
+        with self.assertRaisesRegex(TypeError, "takes no options"):
+            solve_active_space(self._dimer(), gradient_threshold=1e-6)
+
+    def test_unknown_solver_type_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unknown quantum solver type"):
+            create_quantum_solver("not_a_solver")
 
 
 if __name__ == "__main__":

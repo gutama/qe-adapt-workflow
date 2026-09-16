@@ -21,6 +21,10 @@ class ConvergenceCriteria:
     rdm_tolerance: float = 1e-3
     gradient_tolerance: float = 1e-3
     max_outer_iterations: int = 15
+    # require_*=True enforces the criterion, and a quantity the solver never
+    # reported counts as not met. require_*=False switches the criterion off
+    # entirely: the quantity is still recorded for provenance but never gates
+    # convergence, so a loop can actually terminate on the remaining criteria.
     require_rdm: bool = True
     require_gradient: bool = True
 
@@ -189,13 +193,17 @@ class OuterLoopLedger:
         pass_e = abs(delta_e) < self.criteria.energy_tolerance_ev
 
         delta_rdm = self._rdm_distance(current.one_rdm, previous.one_rdm)
-        if delta_rdm is None:
-            pass_rdm: bool | None = False if self.criteria.require_rdm else None
+        if not self.criteria.require_rdm:
+            pass_rdm: bool | None = None
+        elif delta_rdm is None:
+            pass_rdm = False
         else:
             pass_rdm = delta_rdm < self.criteria.rdm_tolerance
 
-        if current.max_gradient is None:
-            pass_gradient: bool | None = False if self.criteria.require_gradient else None
+        if not self.criteria.require_gradient:
+            pass_gradient: bool | None = None
+        elif current.max_gradient is None:
+            pass_gradient = False
         else:
             pass_gradient = current.max_gradient < self.criteria.gradient_tolerance
 

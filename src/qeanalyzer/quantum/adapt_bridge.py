@@ -301,25 +301,8 @@ class SimulatedADAPTVQESolver(QuantumSolver):
         )
 
 
-class ADAPTVQESolver:
-    """Compatibility constructor for the real ``clifford_qc`` ADAPT backend."""
-
-    def __new__(cls, *args: Any, **kwargs: Any):
-        from qeanalyzer.quantum.clifford_bridge import CliffordQCADAPTSolver
-        return CliffordQCADAPTSolver(*args, **kwargs)
-
-
-def create_quantum_solver(solver_type: str = "exact", **kwargs: Any) -> QuantumSolver:
-    key = solver_type.lower().replace("-", "_")
-    if key in {"exact", "fci", "exact_diagonalization", "ed"}:
-        return ExactDiagonalizationSolver()
-    if key in {"adapt", "adapt_vqe", "clifford_adapt", "clifford_qc_adapt"}:
-        return ADAPTVQESolver(**kwargs)
-    if key in {"simulated_adapt", "mock_adapt", "workflow_mock"}:
-        return SimulatedADAPTVQESolver(**kwargs)
-    raise ValueError(f"Unknown quantum solver type {solver_type!r}")
-
-
-def solve_active_space(hamiltonian: MaterialHamiltonian, active_space: ActiveSpace | None = None,
-                       solver_type: str = "exact", **kwargs: Any) -> QuantumRunResult:
-    return create_quantum_solver(solver_type, **kwargs).solve(hamiltonian, active_space=active_space)
+# The solver factory, the ADAPTVQESolver name and solve_active_space live in
+# qeanalyzer.quantum.solver_api, which is the single facade. Second copies here
+# drifted apart from it: they accepted a different alias set, and ADAPTVQESolver
+# was a __new__-factory rather than the class itself, so isinstance() answered
+# differently depending on which module the caller imported from.

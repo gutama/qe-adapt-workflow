@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -19,7 +21,31 @@ from qeanalyzer.quantum.hamiltonian import MaterialHamiltonian
 from qeanalyzer.quantum.units import HARTREE_TO_EV, energy_to_hartree, require_integer_electron_sector
 
 
-def _imports() -> dict[str, Any]:
+@dataclass(frozen=True)
+class CliffordQCAPI:
+    """The ``clifford_qc`` surface this adapter uses, bound by name.
+
+    Fields keep the upstream spelling so a rename on either side is a normal
+    import/attribute error.  The previous ``locals()`` dict resolved the same
+    objects by string key, which turned a typo into a KeyError at solve time and
+    hid the dependency from every static check.
+    """
+
+    ansatz_program: Any
+    run_adapt: Any
+    ExactMVBackend: Any
+    c_op: Any
+    cdag_op: Any
+    CommutatorBank: Any
+    excitation_pool: Any
+    FCIDump: Any
+    model_from_fcidump: Any
+    expectation: Any
+
+
+@lru_cache(maxsize=1)
+def load_clifford_qc() -> CliffordQCAPI:
+    """Import the optional backend once and cache the handles."""
     try:
         from clifford_qc.algorithms.adapt import ansatz_program, run_adapt
         from clifford_qc.backends.exact_mv import ExactMVBackend
@@ -35,20 +61,30 @@ def _imports() -> dict[str, Any]:
             "`pip install -e ../clifford_qc[openfermion]`. "
             "Use SimulatedADAPTVQESolver only for workflow plumbing tests."
         ) from exc
-    return locals()
+    return CliffordQCAPI(
+        ansatz_program=ansatz_program,
+        run_adapt=run_adapt,
+        ExactMVBackend=ExactMVBackend,
+        c_op=c_op,
+        cdag_op=cdag_op,
+        CommutatorBank=CommutatorBank,
+        excitation_pool=excitation_pool,
+        FCIDump=FCIDump,
+        model_from_fcidump=model_from_fcidump,
+        expectation=expectation,
+    )
 
 
 def clifford_qc_available() -> bool:
     try:
-        _imports()
+        load_clifford_qc()
     except ImportError:
         return False
     return True
 
 
 def _to_clifford_fcidump(ham: MaterialHamiltonian) -> Any:
-    api = _imports()
-    FCIDump = api["FCIDump"]
+    api = load_clifford_qc()
     nelec = require_integer_electron_sector(ham.n_electrons)
     n = ham.n_orbitals
     one = np.asarray(
@@ -62,7 +98,7 @@ def _to_clifford_fcidump(ham: MaterialHamiltonian) -> Any:
     )
     core = energy_to_hartree(ham.constant, ham.energy_unit)
     canonical = json.dumps(ham.to_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return FCIDump(
+    return api.FCIDump(
         n_orbitals=n,
         n_electrons=nelec,
         ms2=int(ham.spin),
@@ -76,43 +112,44 @@ def _to_clifford_fcidump(ham: MaterialHamiltonian) -> Any:
     )
 
 
-def _spatial_one_rdm(api: dict[str, Any], model: Any, pool: list[Any], result: Any) -> list[list[float]]:
-    ansatz_program = api["ansatz_program"]
-    ExactMVBackend = api["ExactMVBackend"]
-    cdag_op, c_op, expectation = api["cdag_op"], api["c_op"], api["expectation"]
+def _ansatz_state(api: CliffordQCAPI, model: Any, pool: list[Any], result: Any) -> Any:
+    """Prepare the converged ADAPT ansatz state.
+
+    Both the 1-RDM and the residual gradient are read off this one state. They
+    used to prepare it separately from the identical (model, operators,
+    parameters) triple, which ran the dominant cost of the solve twice.
+    """
     by_label = {op.label: op for op in pool}
     try:
         chosen = [by_label[label] for label in result.labels]
     except KeyError as exc:
         raise RuntimeError(f"clifford_qc ADAPT result references unknown pool label {exc.args[0]!r}") from exc
-    backend = ExactMVBackend()
-    rho = backend.state(ansatz_program(model, chosen), result.parameters)
+    return api.ExactMVBackend().state(api.ansatz_program(model, chosen), result.parameters)
+
+
+def _spatial_one_rdm(api: CliffordQCAPI, model: Any, rho: Any) -> list[list[float]]:
     n_spatial = model.n // 2
     gamma = np.zeros((n_spatial, n_spatial), dtype=float)
     for p in range(n_spatial):
         for q in range(n_spatial):
             value = 0.0
             for spin in (0, 1):
-                op = cdag_op(model.n, 2 * p + spin) * c_op(model.n, 2 * q + spin)
-                value += float(expectation(rho, op).real)
+                op = api.cdag_op(model.n, 2 * p + spin) * api.c_op(model.n, 2 * q + spin)
+                value += float(api.expectation(rho, op).real)
             gamma[p, q] = value
     # Numerical noise can make the exact real-sector result microscopically asymmetric.
     gamma = 0.5 * (gamma + gamma.T)
     return gamma.tolist()
 
 
-def _residual_gradient(api: dict[str, Any], model: Any, pool: list[Any], result: Any) -> float:
-    ansatz_program = api["ansatz_program"]
-    ExactMVBackend = api["ExactMVBackend"]
-    CommutatorBank = api["CommutatorBank"]
+def _residual_gradient(api: CliffordQCAPI, model: Any, pool: list[Any], result: Any, rho: Any) -> float:
     selected = set(result.labels)
     candidates = [i for i, op in enumerate(pool) if op.label not in selected]
     if not candidates:
         return 0.0
-    by_label = {op.label: op for op in pool}
-    chosen = [by_label[label] for label in result.labels]
-    rho = ExactMVBackend().state(ansatz_program(model, chosen), result.parameters)
-    bank = CommutatorBank(model.hamiltonian, [op.word for op in pool], [op.label for op in pool])
+    bank = api.CommutatorBank(
+        model.hamiltonian, [op.word for op in pool], [op.label for op in pool]
+    )
     return max(abs(float(bank.exact_score(i, rho))) for i in candidates)
 
 
@@ -150,14 +187,14 @@ class CliffordQCADAPTSolver(QuantumSolver):
             raise NotImplementedError("custom initial_state handoff to clifford_qc is not implemented yet")
         if not hamiltonian.is_hermitian():
             raise ValueError("ADAPT requires a Hermitian restricted Hamiltonian")
-        api = _imports()
+        api = load_clifford_qc()
         data = _to_clifford_fcidump(hamiltonian)
-        model = api["model_from_fcidump"](data, name="qe-adapt-active-space")
-        pool = api["excitation_pool"](model.n, data.n_electrons)
+        model = api.model_from_fcidump(data, name="qe-adapt-active-space")
+        pool = api.excitation_pool(model.n, data.n_electrons)
         if not pool:
             raise ValueError("clifford_qc excitation pool is empty for this active-space sector")
 
-        result = api["run_adapt"](
+        result = api.run_adapt(
             model,
             pool,
             max_operators=self.max_adapt_iterations,
@@ -167,14 +204,15 @@ class CliffordQCADAPTSolver(QuantumSolver):
             compute_exact_reference=self.compute_exact_reference,
             track_exact_scores=True,
         )
-        one_rdm = _spatial_one_rdm(api, model, pool, result)
+        rho = _ansatz_state(api, model, pool, result)
+        one_rdm = _spatial_one_rdm(api, model, rho)
         natural = sorted((float(x) for x in np.linalg.eigvalsh(np.asarray(one_rdm))), reverse=True)
-        residual = _residual_gradient(api, model, pool, result)
+        residual = _residual_gradient(api, model, pool, result, rho)
 
         exact_ha = result.exact_ground_energy
         total_ev = float(result.energy) * HARTREE_TO_EV
         constant_ev = float(data.core_energy) * HARTREE_TO_EV
-        hf_ha = api["ExactMVBackend"]().expectation(model.reference, model.hamiltonian, ())
+        hf_ha = api.ExactMVBackend().expectation(model.reference, model.hamiltonian, ())
         gradients = [
             float(rec.exact_gradient if rec.exact_gradient is not None else rec.estimate)
             for rec in result.records

@@ -210,5 +210,42 @@ class TestFeedbackNoOpBranchesEmitNoChange(unittest.TestCase):
         self.assertEqual(decision.modified_namelists["SYSTEM"]["nbnd"], 14)
 
 
+class TestSourceResolverRunLayouts(unittest.TestCase):
+    """A coherent single run must resolve, whichever layout QE wrote it in."""
+
+    @staticmethod
+    def _write(path: Path, text: str = "x") -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def test_xml_below_outdir_is_found(self):
+        """outdir='./tmp' puts prefix.save one level down, not beside pw.in."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "run1"
+            self._write(root / "si_scf.in")
+            self._write(root / "si_scf.out")
+            self._write(root / "tmp" / "silicon.save" / "data-file-schema.xml", "<qes/>")
+            resolved = resolve_qe_source_paths([str(root)])
+            self.assertIsNotNone(resolved.xml_path)
+            self.assertEqual(resolved.xml_path.name, "data-file-schema.xml")
+
+    def test_qe_64_writes_two_xml_records_for_one_run(self):
+        """<prefix>.xml and <prefix>.save/data-file-schema.xml are one run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write(root / "silicon.xml", "<qes/>")
+            self._write(root / "silicon.save" / "data-file-schema.xml", "<qes/>")
+            resolved = resolve_qe_source_paths([str(root)])
+            self.assertEqual(resolved.xml_path.name, "data-file-schema.xml")
+
+    def test_two_prefixes_in_one_directory_are_still_ambiguous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write(root / "si.save" / "data-file-schema.xml", "<qes/>")
+            self._write(root / "al.save" / "data-file-schema.xml", "<qes/>")
+            with self.assertRaisesRegex(ValueError, "Ambiguous"):
+                resolve_qe_source_paths([str(root)])
+
+
 if __name__ == "__main__":
     unittest.main()

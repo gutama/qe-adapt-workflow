@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from qeanalyzer.io.qe_xml import HARTREE_TO_EV, HARTREE_TO_RY
+from qeanalyzer.constants import HARTREE_TO_EV, HARTREE_TO_RY
 
 
 @dataclass

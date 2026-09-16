@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 
 from qeanalyzer.io import read_pw_output, read_qe_xml
-from qeanalyzer.models import build_run_result
-from qeanalyzer.quantum.active_space import select_active_space
+from qeanalyzer.models import QEElectronicState, build_run_result
+from qeanalyzer.quantum.active_space import ActiveSpace, select_active_space
 from qeanalyzer.quantum.hamiltonian import (
     MaterialHamiltonian,
     build_band_model_hamiltonian,
@@ -150,6 +150,43 @@ class TestHoppingSignIsPreserved(unittest.TestCase):
             onsite_u=4.0,
         )
         self.assertTrue(ham.is_hermitian())
+
+
+class TestBandModelRejectsUnresolvedBands(unittest.TestCase):
+    @staticmethod
+    def _two_band_state():
+        return QEElectronicState.from_energies(
+            eigenvalues_ev=[[-5.0, 1.0]],
+            occupations=[[2.0, 0.0]],
+            kpoint_weights=[1.0],
+            kpoint_coordinates=[[0.0, 0.0, 0.0]],
+            n_bands=2,
+            n_electrons=2.0,
+            fermi_energy_ev=0.0,
+        )
+
+    def test_band_outside_the_result_is_not_given_a_zero_energy(self):
+        """0.0 eV put a fabricated orbital at the Fermi level and never raised."""
+        space = ActiveSpace(method="explicit", active_orbitals=[0, 7], n_active_electrons=2.0)
+        with self.assertRaisesRegex(ValueError, "no k-weighted eigenvalue"):
+            build_band_model_hamiltonian(self._two_band_state(), space)
+
+    def test_resolved_bands_still_build(self):
+        space = ActiveSpace(method="explicit", active_orbitals=[0, 1], n_active_electrons=2.0)
+        ham = build_band_model_hamiltonian(self._two_band_state(), space)
+        self.assertAlmostEqual(ham.h1[0][0], -5.0)
+        self.assertAlmostEqual(ham.h1[1][1], 1.0)
+
+    def test_spin_guard_is_the_shared_one(self):
+        state = QEElectronicState.from_energies(
+            eigenvalues_ev=[[-5.0, 1.0]], occupations=[[1.0, 0.0]],
+            kpoint_weights=[1.0], kpoint_coordinates=[[0.0, 0.0, 0.0]],
+            n_bands=2, n_electrons=1.0, fermi_energy_ev=0.0, lsda=True,
+        )
+        space = ActiveSpace(method="explicit", active_orbitals=[0], n_active_electrons=1.0)
+        with self.assertRaises(NotImplementedError) as caught:
+            build_band_model_hamiltonian(state, space)
+        self.assertIn("LSDA/spin-polarized", str(caught.exception))
 
 
 if __name__ == "__main__":

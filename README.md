@@ -195,7 +195,7 @@ scientific_status = experimental_heuristic
 
 They are controller experiments, not a derived DFT+many-body functional.
 
-Outer-loop convergence is fail-closed: if RDM or ADAPT-gradient criteria are required but unavailable, they do **not** count as passed. Set `require_rdm=False` or `require_gradient=False` only when that omission is an explicit workflow choice.
+Outer-loop convergence is fail-closed: if RDM or ADAPT-gradient criteria are required but unavailable, they do **not** count as passed. Setting `require_rdm=False` or `require_gradient=False` removes that criterion from the convergence test altogether -- the quantity is still recorded for provenance, but the loop no longer closes on it.
 
 ## Tests
 

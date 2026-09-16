@@ -97,7 +97,7 @@ def _resolve_electronic_state(source: QEElectronicState | QERunResult) -> QEElec
     raise TypeError(f"Expected QEElectronicState or QERunResult, got {type(source).__name__}")
 
 
-def _require_restricted_band_semantics(el: QEElectronicState) -> None:
+def require_restricted_band_semantics(el: QEElectronicState) -> None:
     """Reject spin representations that cannot be mapped by 2*b + spin."""
     if el.lsda or el.noncolin or el.spinorbit:
         modes = []
@@ -113,7 +113,13 @@ def _require_restricted_band_semantics(el: QEElectronicState) -> None:
         )
 
 
-def _weights(el: QEElectronicState, n: int) -> list[float]:
+def kpoint_weights_for(el: QEElectronicState, n: int) -> list[float]:
+    """Normalized k-point weights aligned with ``n`` k-resolved rows.
+
+    Shared with the band-model Hamiltonian builder: weighted_band_average indexes
+    this list per row, so a length mismatch has to be an error rather than a
+    silently truncated average.
+    """
     if n <= 0:
         return []
     weights = el.normalized_kpoint_weights()
@@ -124,28 +130,52 @@ def _weights(el: QEElectronicState, n: int) -> list[float]:
     return weights
 
 
+KPOINT_MODES = ("auto", "gamma", "average", "any")
+
+
+def _find_gamma_index(el: QEElectronicState) -> int | None:
+    """Index of the Gamma point, or ``None`` when this result cannot place it."""
+    for index, point in enumerate(el.kpoint_coordinates):
+        if all(abs(component) <= 1e-8 for component in point):
+            return index
+    return None
+
+
 def _gamma_kpoint_index(el: QEElectronicState) -> int:
     """Locate the Gamma point rather than assuming it is listed first.
 
     QE does not guarantee any particular ordering of the IBZ k-point list, so
     reading index 0 can silently sample a zone-boundary point instead.
     """
-    coords = el.kpoint_coordinates
-    if not coords:
+    if not el.kpoint_coordinates:
         raise ValueError(
             "kpoint_mode='gamma' needs k-point coordinates to identify the Gamma point, "
             "and this result carries none. Use kpoint_mode='average' or 'any' instead."
         )
-    for index, point in enumerate(coords):
-        if all(abs(component) <= 1e-8 for component in point):
-            return index
-    raise ValueError(
-        "kpoint_mode='gamma' was requested but no k-point at (0, 0, 0) is present in this "
-        "result. Use kpoint_mode='average' or 'any' instead."
-    )
+    index = _find_gamma_index(el)
+    if index is None:
+        raise ValueError(
+            "kpoint_mode='gamma' was requested but no k-point at (0, 0, 0) is present in this "
+            "result. Use kpoint_mode='average' or 'any' instead."
+        )
+    return index
 
 
-def _weighted_band_average(rows: list[list[float]], band: int, weights: list[float]) -> float | None:
+def _resolve_kpoint_mode(el: QEElectronicState, requested: str) -> str:
+    """Resolve ``kpoint_mode='auto'`` against what this result actually carries.
+
+    An explicit ``'gamma'`` still raises when Gamma is absent -- the caller asked
+    for one specific k-point. ``'auto'`` prefers Gamma when the result contains
+    it and uses the k-point-weighted average otherwise, so shifted Monkhorst-Pack
+    meshes and pw.out-only results stay usable. The mode actually used is
+    recorded in the active-space metadata rather than left implicit.
+    """
+    if requested != "auto":
+        return requested
+    return "gamma" if _find_gamma_index(el) is not None else "average"
+
+
+def weighted_band_average(rows: list[list[float]], band: int, weights: list[float]) -> float | None:
     pairs = [(row[band], weights[k]) for k, row in enumerate(rows) if band < len(row)]
     if not pairs:
         return None
@@ -157,9 +187,9 @@ def _weighted_band_average(rows: list[list[float]], band: int, weights: list[flo
 
 def _electron_partition(el: QEElectronicState, active: list[int], frozen_core: list[int]) -> tuple[float, float]:
     if el.occupations:
-        weights = _weights(el, len(el.occupations))
-        active_e = sum((_weighted_band_average(el.occupations, b, weights) or 0.0) for b in active)
-        core_e = sum((_weighted_band_average(el.occupations, b, weights) or 0.0) for b in frozen_core)
+        weights = kpoint_weights_for(el, len(el.occupations))
+        active_e = sum((weighted_band_average(el.occupations, b, weights) or 0.0) for b in active)
+        core_e = sum((weighted_band_average(el.occupations, b, weights) or 0.0) for b in frozen_core)
         return active_e, core_e
     if el.n_electrons is None:
         return 0.0, 0.0
@@ -169,17 +199,20 @@ def _electron_partition(el: QEElectronicState, active: list[int], frozen_core: l
 
 
 def _build_space(el: QEElectronicState, *, method: str, active: list[int], metadata: dict[str, Any],
-                 energy_window_ev: tuple[float, float] | None = None) -> ActiveSpace:
+                 n_bands: int, energy_window_ev: tuple[float, float] | None = None) -> ActiveSpace:
     if not active:
         raise ValueError("active-space selection produced no bands")
-    n_bands = el.n_bands or max(active) + 1
     maximum = max(active)
+    # The selector already derived the band count from the k-resolved rows, which
+    # is the only source when el.n_bands is unset; re-deriving it here from
+    # max(active) alone left frozen_virtual empty for every such result.
+    total_bands = max(n_bands, maximum + 1)
     # Every band below the top of the active window that is not itself active is
     # frozen -- including bands interior to a non-contiguous selection. Deriving
     # this from min(active) alone left those gap bands in no category at all, so
     # their electrons vanished from n_active_electrons + n_core_electrons.
     frozen_core = [band for band in range(maximum) if band not in set(active)]
-    frozen_virtual = list(range(maximum + 1, n_bands))
+    frozen_virtual = list(range(maximum + 1, total_bands))
     active_e, core_e = _electron_partition(el, active, frozen_core)
     fermi = el.fermi_energy_ev if el.fermi_energy_ev is not None else el.highest_occupied_ev
     return ActiveSpace(
@@ -203,11 +236,11 @@ def _build_space(el: QEElectronicState, *, method: str, active: list[int], metad
 
 class EnergyWindowSelector(ActiveSpaceSelector):
     def __init__(self, emin_ev: float = -3.0, emax_ev: float = 3.0,
-                 relative_to_fermi: bool = True, kpoint_mode: str = "gamma") -> None:
+                 relative_to_fermi: bool = True, kpoint_mode: str = "auto") -> None:
         if emin_ev > emax_ev:
             raise ValueError(f"emin_ev ({emin_ev}) must be <= emax_ev ({emax_ev})")
-        if kpoint_mode not in {"gamma", "average", "any"}:
-            raise ValueError("kpoint_mode must be 'gamma', 'average', or 'any'")
+        if kpoint_mode not in KPOINT_MODES:
+            raise ValueError(f"kpoint_mode must be one of {KPOINT_MODES}")
         self.emin_ev = emin_ev
         self.emax_ev = emax_ev
         self.relative_to_fermi = relative_to_fermi
@@ -215,7 +248,7 @@ class EnergyWindowSelector(ActiveSpaceSelector):
 
     def select(self, state: QEElectronicState | QERunResult) -> ActiveSpace:
         el = _resolve_electronic_state(state)
-        _require_restricted_band_semantics(el)
+        require_restricted_band_semantics(el)
         if not el.eigenvalues_ev:
             raise ValueError("No eigenvalues available to select an active space")
         reference = 0.0
@@ -229,17 +262,18 @@ class EnergyWindowSelector(ActiveSpaceSelector):
         low = reference + self.emin_ev if self.relative_to_fermi else self.emin_ev
         high = reference + self.emax_ev if self.relative_to_fermi else self.emax_ev
         n_bands = el.n_bands or len(el.eigenvalues_ev[0])
-        weights = _weights(el, len(el.eigenvalues_ev))
-        gamma_index = _gamma_kpoint_index(el) if self.kpoint_mode == "gamma" else 0
+        weights = kpoint_weights_for(el, len(el.eigenvalues_ev))
+        mode = _resolve_kpoint_mode(el, self.kpoint_mode)
+        gamma_index = _gamma_kpoint_index(el) if mode == "gamma" else 0
         active: list[int] = []
         for band in range(n_bands):
             vals = [row[band] for row in el.eigenvalues_ev if band < len(row)]
             if not vals:
                 continue
-            if self.kpoint_mode == "any":
+            if mode == "any":
                 include = any(low <= value <= high for value in vals)
-            elif self.kpoint_mode == "average":
-                avg = _weighted_band_average(el.eigenvalues_ev, band, weights)
+            elif mode == "average":
+                avg = weighted_band_average(el.eigenvalues_ev, band, weights)
                 include = avg is not None and low <= avg <= high
             else:
                 gamma_row = el.eigenvalues_ev[gamma_index]
@@ -249,12 +283,14 @@ class EnergyWindowSelector(ActiveSpaceSelector):
         if not active:
             raise ValueError(f"No bands found within energy window [{low:.3f}, {high:.3f}] eV")
         return _build_space(
-            el, method="energy_window", active=active, energy_window_ev=(low, high),
+            el, method="energy_window", active=active, n_bands=n_bands,
+            energy_window_ev=(low, high),
             metadata={
                 "emin_rel_ev": self.emin_ev if self.relative_to_fermi else None,
                 "emax_rel_ev": self.emax_ev if self.relative_to_fermi else None,
                 "relative_to_fermi": self.relative_to_fermi,
                 "kpoint_mode": self.kpoint_mode,
+                "kpoint_mode_resolved": mode,
                 "occupation_average": "kpoint_weighted",
             },
         )
@@ -276,13 +312,13 @@ class BandIndexSelector(ActiveSpaceSelector):
 
     def select(self, state: QEElectronicState | QERunResult) -> ActiveSpace:
         el = _resolve_electronic_state(state)
-        _require_restricted_band_semantics(el)
+        require_restricted_band_semantics(el)
         n_bands = el.n_bands or (len(el.eigenvalues_ev[0]) if el.eigenvalues_ev else max(self.indices) + 1)
         for band in self.indices:
             if band < 0 or band >= n_bands:
                 raise IndexError(f"Band index {band} out of range [0, {n_bands - 1}]")
         return _build_space(
-            el, method="band_index", active=list(self.indices),
+            el, method="band_index", active=list(self.indices), n_bands=n_bands,
             metadata={"specified_indices": list(self.indices), "occupation_average": "kpoint_weighted"},
         )
 
@@ -295,14 +331,14 @@ class OccupationSelector(ActiveSpaceSelector):
 
     def select(self, state: QEElectronicState | QERunResult) -> ActiveSpace:
         el = _resolve_electronic_state(state)
-        _require_restricted_band_semantics(el)
+        require_restricted_band_semantics(el)
         if not el.occupations:
             raise ValueError("No occupations available for OccupationSelector")
         n_bands = el.n_bands or len(el.occupations[0])
-        weights = _weights(el, len(el.occupations))
+        weights = kpoint_weights_for(el, len(el.occupations))
         active = []
         for band in range(n_bands):
-            avg = _weighted_band_average(el.occupations, band, weights)
+            avg = weighted_band_average(el.occupations, band, weights)
             if avg is not None and self.min_occ <= avg <= self.max_occ:
                 active.append(band)
         if not active:
@@ -310,7 +346,7 @@ class OccupationSelector(ActiveSpaceSelector):
                 f"No bands found within occupation range [{self.min_occ}, {self.max_occ}]"
             )
         return _build_space(
-            el, method="occupation", active=active,
+            el, method="occupation", active=active, n_bands=n_bands,
             metadata={
                 "min_occ": self.min_occ,
                 "max_occ": self.max_occ,

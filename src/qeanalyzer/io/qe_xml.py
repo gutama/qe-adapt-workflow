@@ -12,16 +12,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
-# -- Physical constants ------------------------------------------------------
-
-HARTREE_TO_RY: float = 2.0
-HARTREE_TO_EV: float = 27.211386245988
-BOHR_TO_ANGSTROM: float = 0.529177210903
-# 1 Hartree / Bohr^3 to kbar: 1 Ha = 4.3597447222071e-18 J, 1 Bohr = 5.29177210903e-11 m
-# 1 Ha/Bohr^3 = 2.942102648438959e13 Pa = 2.942102648438959e8 bar = 294210.2648438959 kbar
-# Cross-check: QE's uakbar = 147105.0 kbar per Ry/Bohr^3, and 1 Ha = 2 Ry.
-HARTREE_BOHR3_TO_KBAR: float = 294210.2648438959
+# Physical constants are defined once in qeanalyzer.constants, so the Hartree
+# conversions applied to parsed QE energies are the same objects used at the
+# FCIDUMP boundary. Re-exported here: this module is where callers have always
+# imported them from.
+from qeanalyzer.constants import (
+    HARTREE_BOHR3_TO_KBAR,
+    HARTREE_TO_EV,
+    HARTREE_TO_RY,
+)
 
 
 # -- Data classes ------------------------------------------------------------

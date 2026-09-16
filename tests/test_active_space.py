@@ -226,5 +226,41 @@ class TestActiveSpaceFactory(unittest.TestCase):
         self.assertEqual(asp.n_active_orbitals, 3)
 
 
+class TestBandCountAndKpointMode(unittest.TestCase):
+    @staticmethod
+    def _state(coords, n_bands=None):
+        return QEElectronicState.from_energies(
+            eigenvalues_ev=[[-5.0, -4.0, -3.0, 1.0, 2.0, 3.0]] * len(coords),
+            occupations=[[2.0, 2.0, 2.0, 0.0, 0.0, 0.0]] * len(coords),
+            kpoint_weights=[1.0 / len(coords)] * len(coords),
+            kpoint_coordinates=coords,
+            n_bands=n_bands,
+            n_electrons=6.0,
+            fermi_energy_ev=0.0,
+        )
+
+    def test_frozen_virtuals_survive_an_unset_n_bands(self):
+        """The selector counts bands from the k-rows; _build_space must use that."""
+        state = self._state([[0.0, 0.0, 0.0]], n_bands=None)
+        asp = select_active_space(state, method="band_index", band_start=1, band_end=2)
+        self.assertEqual(asp.frozen_virtual_orbitals, [3, 4, 5])
+
+    def test_shifted_mesh_does_not_break_the_default_window(self):
+        """A shifted Monkhorst-Pack mesh has no Gamma; the default must cope."""
+        shifted = self._state([[0.125, 0.125, 0.125], [0.375, 0.125, 0.125]], n_bands=6)
+        asp = select_active_space(shifted, method="energy_window", emin_ev=-3.0, emax_ev=3.0)
+        self.assertEqual(asp.metadata["kpoint_mode_resolved"], "average")
+
+    def test_gamma_is_preferred_when_present(self):
+        withgamma = self._state([[0.5, 0.0, 0.0], [0.0, 0.0, 0.0]], n_bands=6)
+        asp = select_active_space(withgamma, method="energy_window", emin_ev=-3.0, emax_ev=3.0)
+        self.assertEqual(asp.metadata["kpoint_mode_resolved"], "gamma")
+
+    def test_explicit_gamma_still_refuses_to_guess(self):
+        shifted = self._state([[0.125, 0.125, 0.125]], n_bands=6)
+        with self.assertRaisesRegex(ValueError, r"no k-point at \(0, 0, 0\)"):
+            select_active_space(shifted, method="energy_window", kpoint_mode="gamma")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -100,5 +100,59 @@ class TestOuterLoop(unittest.TestCase):
         self.assertEqual(decision.decision_type, "NEXT_RUN")
 
 
+class TestRequireFlagsDisableCriteria(unittest.TestCase):
+    """require_*=False must switch a criterion off, not merely excuse its absence."""
+
+    def _dft(self):
+        return build_run_result(
+            pw_in=read_pw_input(FIXTURES / "si_scf.in"),
+            pw_out=read_pw_output(FIXTURES / "si_scf.out"),
+            qe_xml=read_qe_xml(FIXTURES / "si_scf.xml"),
+            run_id="dft",
+        )
+
+    @staticmethod
+    def _quantum(energy, rdm):
+        return QuantumRunResult(
+            energy_ev=energy,
+            electronic_energy_ev=energy,
+            solver_type="exact_diagonalization",
+            n_orbitals=2,
+            n_electrons=2.0,
+            n_spin_orbitals=4,
+            one_rdm=rdm,
+            operator_gradients=[],
+        )
+
+    def _ledger(self, criteria):
+        ledger = OuterLoopLedger(criteria)
+        ledger.record_iteration(self._dft(), self._quantum(-1.0, [[1.0, 0.0], [0.0, 1.0]]))
+        ledger.record_iteration(self._dft(), self._quantum(-1.0, [[2.0, 0.0], [0.0, 2.0]]))
+        return ledger.check_convergence()
+
+    def test_a_reported_rdm_cannot_block_a_criterion_that_is_switched_off(self):
+        result = self._ledger(ConvergenceCriteria(
+            energy_tolerance_ev=1e-2, rdm_tolerance=1e-6,
+            require_rdm=False, require_gradient=False,
+        ))
+        self.assertTrue(result.is_converged)
+        self.assertIsNone(result.passed_criteria["rdm"])
+
+    def test_the_distance_is_still_recorded_for_provenance(self):
+        result = self._ledger(ConvergenceCriteria(
+            energy_tolerance_ev=1e-2, rdm_tolerance=1e-6,
+            require_rdm=False, require_gradient=False,
+        ))
+        self.assertIsNotNone(result.delta_rdm_frobenius)
+
+    def test_a_required_rdm_still_gates_convergence(self):
+        result = self._ledger(ConvergenceCriteria(
+            energy_tolerance_ev=1e-2, rdm_tolerance=1e-6,
+            require_rdm=True, require_gradient=False,
+        ))
+        self.assertFalse(result.is_converged)
+        self.assertIs(result.passed_criteria["rdm"], False)
+
+
 if __name__ == "__main__":
     unittest.main()

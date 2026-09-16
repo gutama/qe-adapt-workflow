@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import math
 
-HARTREE_TO_EV = 27.211386245988
-HARTREE_TO_RY = 2.0
+# Single source of truth, shared with the QE XML parser: the Hartree conversions
+# used at the FCIDUMP boundary must be the ones used for parsed QE energies.
+from qeanalyzer.constants import HARTREE_TO_EV, HARTREE_TO_RY
 
 
 def normalize_energy_unit(unit: str) -> str:

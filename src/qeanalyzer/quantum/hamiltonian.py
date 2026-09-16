@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from qeanalyzer.models import QEElectronicState, QERunResult
-from qeanalyzer.quantum.active_space import ActiveSpace
+from qeanalyzer.quantum.active_space import (
+    ActiveSpace,
+    kpoint_weights_for,
+    require_restricted_band_semantics,
+    weighted_band_average,
+)
 from qeanalyzer.quantum.units import normalize_energy_unit
 
 
@@ -283,14 +288,6 @@ def build_hubbard_hamiltonian(
     )
 
 
-def _weighted_average(rows: list[list[float]], band: int, weights: list[float]) -> float:
-    values = [(row[band], weights[k]) for k, row in enumerate(rows) if band < len(row)]
-    if not values:
-        return 0.0
-    denom = sum(w for _, w in values)
-    return sum(v * w for v, w in values) / denom if denom else 0.0
-
-
 def build_band_model_hamiltonian(
     state: QEElectronicState | QERunResult,
     active_space: ActiveSpace,
@@ -310,17 +307,26 @@ def build_band_model_hamiltonian(
     :func:`build_integral_hamiltonian`.
     """
     el = state.electronic if isinstance(state, QERunResult) else state
-    if el.lsda or el.noncolin or el.spinorbit:
-        raise NotImplementedError("band-model builder supports only restricted collinear QE results")
+    require_restricted_band_semantics(el)
     if not el.eigenvalues_ev:
         raise ValueError("QE eigenvalues are required for the band-derived model")
     n = active_space.n_active_orbitals
     if n <= 0:
         raise ValueError("active space is empty")
-    weights = el.normalized_kpoint_weights() or [1.0 / len(el.eigenvalues_ev)] * len(el.eigenvalues_ev)
+    weights = kpoint_weights_for(el, len(el.eigenvalues_ev))
     h1 = [[0.0] * n for _ in range(n)]
     for local, band in enumerate(active_space.active_orbitals):
-        h1[local][local] = _weighted_average(el.eigenvalues_ev, band, weights)
+        # A band the QE result never resolved has no on-site energy. Falling back
+        # to 0.0 here placed a fabricated orbital at the Fermi level and carried
+        # it silently into h1, the FCIDUMP and every downstream solver energy.
+        average = weighted_band_average(el.eigenvalues_ev, band, weights)
+        if average is None:
+            raise ValueError(
+                f"Active band {band} has no k-weighted eigenvalue in this QE result: it is "
+                "absent from every k-point row, or the k-point weights sum to zero. "
+                "Refusing to emit a fabricated 0 eV on-site energy."
+            )
+        h1[local][local] = average
     ham = build_hubbard_hamiltonian(
         n_orbitals=n,
         n_electrons=active_space.n_active_electrons,
