@@ -257,6 +257,23 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_solvers(args: argparse.Namespace) -> int:
+    """Handle `qeanalyzer solvers` subcommand."""
+    from .quantum import clifford_qc_available, clifford_qc_subspace_available, describe_solvers
+
+    sys.stdout.write(describe_solvers() + "\n\n")
+    # Whether the optional sibling is importable decides which of these names
+    # can actually run here, so the listing says so instead of leaving a caller
+    # to discover it at solve time.
+    for requirement, available in (
+        ("clifford_qc", clifford_qc_available()),
+        ("clifford_qc.subspace", clifford_qc_subspace_available()),
+    ):
+        state = "installed" if available else "NOT installed"
+        sys.stdout.write(f"{requirement}: {state}\n")
+    return 0
+
+
 def cmd_export_fcidump(args: argparse.Namespace) -> int:
     """Handle `qeanalyzer export-fcidump` subcommand."""
     pw_in, pw_out, qe_xml, input_text = _detect_and_load_sources(args.paths)
@@ -528,6 +545,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to workflow.json ledger file (default: 'workflow.json')",
     )
 
+    subparsers.add_parser(
+        "solvers",
+        help="List the correlated solvers this workflow can drive",
+    )
+
     # export-fcidump subcommand
     fci_parser = subparsers.add_parser(
         "export-fcidump",
@@ -607,6 +629,7 @@ _COMMANDS = {
     "next": cmd_next,
     "history": cmd_history,
     "validate": cmd_validate,
+    "solvers": cmd_solvers,
     "export-fcidump": cmd_export_fcidump,
 }
 

@@ -20,10 +20,11 @@ This document freezes the scientific/API boundaries between `qe-adapt-workflow` 
 - Pauli/Clifford operator algebra;
 - Jordan-Wigner quantum-model execution;
 - ADAPT-VQE selection and variational optimization;
+- A-CASE subspace growth, projected matrix elements and Ritz solves;
 - finite-shot selection/measurement machinery;
 - other quantum algorithms and subspace methods.
 
-The QE project must not maintain a second scientific ADAPT implementation.
+The QE project must not maintain a second scientific implementation of any of them. Adding a method here means adding a *bridge* -- a `QuantumSolver` that translates this repository's Hamiltonian into the backend's model and the backend's result into a `QuantumRunResult` -- never a second engine.
 
 ## 2. Three different Hamiltonian paths
 
@@ -123,6 +124,51 @@ The adapter additionally evaluates the final spatial 1-RDM and the final residua
 
 The old synthetic trajectory is exposed only as `SimulatedADAPTVQESolver` and is marked non-scientific.
 
+## 7a. A-CASE, and why it is a different method
+
+`CliffordQCACASESolver` calls:
+
+```python
+clifford_qc.subspace.run_acase
+```
+
+on the same restricted FCIDUMP convention, with `clifford_qc.subspace.determinant_excitations` as the candidate generators. A-CASE is **not** a variant of ADAPT-VQE:
+
+| | ADAPT-VQE | A-CASE |
+|---|---|---|
+| object grown | unitary ansatz `exp(theta_k A_k)` | linear subspace `span{A_i\|psi>}` |
+| how the answer is found | parameter optimization | Rayleigh-Ritz generalized eigenproblem |
+| convergence measure | pool commutator gradient | Ritz residual norm |
+| reported here as | `residual_kind="adapt_pool_gradient"` | `residual_kind="ritz_residual_norm"` |
+
+Consequences the bridge is explicit about:
+
+- **No variational parameters exist**, so `operator_parameters` and `operator_gradients` stay empty rather than being filled with predicted lowerings that merely resemble gradients. Growth diagnostics live in `metadata`.
+- **The 1-RDM is read through the projected-observable route** (`SubspaceResult.expectation`), never by forming the Ritz state. `expectation` requires a Hermitian observable, so an off-diagonal element is measured as `(c†_p c_q + c†_q c_p)/2` -- exactly the symmetric part the ADAPT path also reports.
+- **The Ritz residual is a dense validation-tier quantity** (`clifford_qc.subspace.dense_residual_norm`): it reconstructs the state explicitly, so its cost is exponential in the active space, like this repository's own exact FCI reference. `compute_ritz_residual=False` turns it off, and the solver then reports no residual at all rather than a cheaper number under the same name.
+- **Convergence is fail-closed.** With a residual, converged means residual below threshold. Without one, only an exhausted candidate pool -- a complete basis in that excitation family -- counts as converged; growth that merely stopped improving does not.
+- **The chemistry extra is not a dependency of this path.** `openfermion` is needed by ADAPT's excitation pool; A-CASE builds determinant excitations natively, so the bridge loads only `CliffordQCCoreAPI` (model, state, fermion operators) and leaves the pool to the methods that use it.
+
+## 7b. ADAPT-VQE warm-started A-CASE
+
+`CliffordQCADAPTACASESolver` is `clifford_qc.subspace.adapt_warm_start`: ADAPT-VQE runs first, and its optimized state becomes the A-CASE reference.
+
+A warmer reference is **not** automatically a better answer, and the composition must not be presented as an improvement by construction:
+
+- A converged ADAPT state is stationary against the same excitation family A-CASE grows with. For an anti-Hermitian generator `A`, the Ritz coupling `<psi|H A|psi>` is half the ADAPT gradient `<psi|[H,A]|psi>`, so directions ADAPT has already flattened contribute no first-order lowering. The subspace can then decline to grow at all -- `grew_beyond_reference=False` -- while still sitting above the exact energy.
+- The upstream project has replicated a case where a *better* ADAPT reference produced a *worse* A-CASE subspace (`benchmarks/run_warm_start_replication.py`, Kendall tau of -1 across an operator ladder).
+
+The bridge therefore reports the reference energy, the lowering the subspace actually achieved, and whether it grew at all -- and reads convergence from the residual, never from the absence of growth.
+
+## 7c. Multi-arm comparison records
+
+`compare_solvers` / `ComparisonSolver` run several methods on one Hamiltonian and keep every arm. The record is evidence, not a verdict:
+
+- Every arm is fingerprinted against one `hamiltonian_sha256`, and an arm that answered a different orbital count or particle-number sector is refused rather than tabulated next to the others.
+- Ranking is the variational reading -- lowest energy on the same Hamiltonian and sector -- and is restricted to arms that are scientific results. `SimulatedADAPTVQESolver` derives its numbers from the exact solution and would frequently "win", so a `workflow_mock` arm is recorded, marked `rankable=false`, and never selected.
+- **Budget matching is never inferred.** `matched_budget_declared` is true only when the caller passed a `budget_note`; otherwise the summary says the arms were not matched on cost. Wall time is recorded as provenance and is not a hardware cost model or a quantum resource count.
+- A comparison is labelled `scientific_status="comparison_record"`, and the whole record is carried into the outer-loop ledger, so an iteration driven by one arm still shows what every other method said.
+
 ## 8. Feedback policies
 
 The existing feedback rules are controller heuristics. They do not constitute a validated DFT+many-body self-consistency functional.
@@ -145,6 +191,8 @@ In particular:
 Missing information is not success.
 
 If `require_rdm=True`, missing or shape-incompatible 1-RDMs fail the RDM criterion. If `require_gradient=True`, an unavailable residual ADAPT gradient fails the gradient criterion. Absence is never silently converted to zero.
+
+The third criterion is the **solver-reported residual**, not an ADAPT gradient. `ConvergenceCriteria.gradient_tolerance` keeps its name so existing ledgers stay readable, but what it compares is `QuantumRunResult.residual`, whose meaning per iteration is recorded as `quantum_residual_kind`. Residuals cross the `clifford_qc` boundary in **Hartree**, so that tolerance is in Hartree while `energy_tolerance_ev` is in eV. A solver that cannot supply a residual reports `None`, which is not a zero: it fails the criterion until the criterion is switched off.
 
 `require_rdm=False` / `require_gradient=False` switch the criterion off entirely: the quantity is still measured and recorded in the ledger for provenance, but it cannot gate convergence. The flag is a statement about which criteria the workflow is closing on, not merely permission for the solver to omit one -- otherwise a solver that *did* report the quantity would still gate a loop the user had already excluded it from, and that loop could never terminate.
 

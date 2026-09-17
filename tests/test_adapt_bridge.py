@@ -242,10 +242,19 @@ class TestSolverFacade(unittest.TestCase):
         )
 
     def test_adapt_aliases_all_resolve_to_the_clifford_backend(self):
-        for alias in ("adapt", "adapt-vqe", "adapt_vqe", "vqe", "clifford_adapt",
+        for alias in ("adapt", "adapt-vqe", "adapt_vqe", "clifford_adapt",
                       "clifford_qc_adapt", "ADAPT-VQE"):
             with self.subTest(alias=alias):
                 self.assertIsInstance(create_quantum_solver(alias), CliffordQCADAPTSolver)
+
+    def test_bare_vqe_is_no_longer_silently_adapt(self):
+        """It meant ADAPT while ADAPT was the only method; now it names nothing.
+
+        A-CASE is not a VQE and clifford_qc has a fixed-ansatz VQE of its own,
+        so guessing here would label a run as the method it was not.
+        """
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            create_quantum_solver("vqe")
 
     def test_adapt_bridge_no_longer_ships_a_second_factory(self):
         from qeanalyzer.quantum import adapt_bridge, solver_api
